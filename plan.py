@@ -2,7 +2,6 @@
 #-*- coding:utf-8 -*-
 
 from data_util import *
-import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import rnn
 
@@ -44,20 +43,11 @@ def _cut(sentence):
 def _extract(sentence):
     return filter(lambda x: x in _word2int, _cut(sentence))
 
-def _batch_train_data(_train_data, epoch):
-    i = 0
-    while i < len(_train_data):
-        j = min(len(_train_data), i+_BATCH_SIZE)
-        vects = [_encode_words(words) for words in _train_data[i:j]]
-        lengths = [len(vect)-1 for vect in vects]
-        max_len = max(lengths)
-        for k, vect in enumerate(vects):
-            if len(vect) < max_len:
-                vects[k].extend([_VOCAB_SIZE-1]*(max_len-len(vect)))
-        print "[Training RNNML] epoch = %d/%d, processing %d/%d ..." \
-                %(epoch, _NUM_EPOCHS, j, len(_train_data))
-        yield np.matrix(vects), np.array(lengths)
-        i = j
+def _batch_train_data():
+    for rows in batch_lm_train_data(_BATCH_SIZE):
+        matrix = fill_np_matrix(map(_encode_words, rows), _BATCH_SIZE, _VOCAB_SIZE-1)
+        length = fill_np_array(map(len, rows), _BATCH_SIZE, 0)
+        yield matrix, length
 
 
 class Planner:
@@ -97,9 +87,11 @@ class Planner:
         init_op = tf.group(tf.global_variables_initializer(),
                 tf.local_variables_initializer())
         sess.run(init_op)
-        _train_data = get_lm_train_data()
         for epoch in range(_NUM_EPOCHS):
-            for _batch, _lengths in _batch_train_data(_train_data, epoch):
+            cnt = 0
+            for _batch, _lengths in _batch_train_data():
+                print "[Training RNNLM] epoch = %d, processing line %d to %d ..." %(epoch, cnt, cnt+_BATCH_SIZE-1)
+                cnt += _BATCH_SIZE
                 inputs = _batch[:,:-1]
                 targets = _batch[:,1:]
                 sess.run([self.opt_op], feed_dict = {
@@ -151,10 +143,8 @@ class Planner:
                 filter(lambda i: 0==i or keywords[i]!=keywords[i-1], range(len(keywords)))]
         if len(words) < 4:
             self._expand(words, 4)
-        elif len(words) > 4 and len(words) < 8:
-            self._expand(words, 8)
         else:
-            while len(words) > 8:
+            while len(words) > 4:
                 words.pop()
         return words
 
