@@ -75,7 +75,7 @@ if not os.path.exists(sxhy_path):
     _gen_sxhy_dict()
 jieba.load_userdict(sxhy_path)
 
-def _get_sxhy_dict():
+def get_sxhy_dict():
     sxhy_dict = set()
     with codecs.open(sxhy_path, 'r', 'utf-8') as fin:
         line = fin.readline()
@@ -87,7 +87,7 @@ def _get_sxhy_dict():
 class Segmenter:
 
     def __init__(self):
-        self.sxhy_dict = _get_sxhy_dict()
+        self.sxhy_dict = get_sxhy_dict()
 
     def segment(self, sentence):
         if len(sentence) < 3:
@@ -103,8 +103,11 @@ class Segmenter:
                     else:
                         segs.extend(list(jieba.cut(sentence[i:])))
                     break
-                else:
+                elif sentence[i:i+2] in self.sxhy_dict:
                     segs.append(sentence[i:i+2])
+                else:
+                    segs.extend(jieba.cut(sentence[i:i+2]))
+            #uprintln(segs)
             return segs
 
 
@@ -114,10 +117,8 @@ ssy_raw = os.path.join(raw_dir, 'shisiyun.txt')
 py_raw = os.path.join(raw_dir, 'pinyin.txt')
 
 rhy_path = os.path.join(data_dir, 'rhy_dict.txt')
-
-def _gen_rhy_dict():
-    print "Generating rhyme dictionary ...",
-    sys.stdout.flush()
+    
+def _get_ssy_ch2rhy():
     ch2rhy = dict()
     with codecs.open(ssy_raw, 'r', 'utf-8') as fin:
         yun = 0
@@ -151,6 +152,12 @@ def _gen_rhy_dict():
                                 ch2rhy[ch].append(rhyme)
                     state = 0
             line = fin.readline()
+    return ch2rhy
+    
+def _gen_rhy_dict():
+    print "Generating rhyme dictionary ...",
+    sys.stdout.flush()
+    ch2rhy = _get_ssy_ch2rhy()
     p2ch = dict()
     with codecs.open(py_raw, 'r', 'utf-8') as fin:
         line = fin.readline()
@@ -343,6 +350,41 @@ def _get_stopwords():
 
 rank_path = os.path.join(data_dir, 'word_ranks.json')
 
+def _text_rank(adjlist):
+    damp = 0.85
+    scores = dict((word,1.0) for word in adjlist)
+    try:
+        for i in xrange(5000):
+            print "[TextRank] Start iteration %d ..." %i,
+            sys.stdout.flush()
+            cnt = 0
+            new_scores = dict()
+            for word in adjlist:
+                new_scores[word] = (1-damp)+damp*sum(adjlist[other][word]*scores[other] \
+                        for other in adjlist[word])
+                if scores[word] != new_scores[word]:
+                    cnt += 1
+            print "Done (%d/%d)" %(cnt, len(scores))
+            if 0 == cnt:
+                break
+            else:
+                scores = new_scores
+        print "TextRank is done."
+    except KeyboardInterrupt:
+        print "\nTextRank is interrupted."
+    sxhy_dict = get_sxhy_dict()
+    def _compare_words(a, b):
+        if a[0] in sxhy_dict and b[0] not in sxhy_dict:
+            return -1
+        elif a[0] not in sxhy_dict and b[0] in sxhy_dict:
+            return 1
+        else:
+            return cmp(b[1], a[1])
+    words = sorted([(word,score) for word,score in scores.items()],
+            cmp = _compare_words)
+    with codecs.open(rank_path, 'w', 'utf-8') as fout:
+        json.dump(words, fout)
+
 def _rank_all_words():
     stopwords=  _get_stopwords()
     segmenter = Segmenter()
@@ -373,27 +415,7 @@ def _rank_all_words():
         for other in adjlist[word]:
             adjlist[word][other] /= w_sum
     print "[TextRank] Weighted graph has been built."
-    damp = 0.85
-    scores = dict((word,1.0) for word in adjlist)
-    for i in xrange(10):
-        print "[TextRank] Start iteration %d ..." %i,
-        sys.stdout.flush()
-        cnt = 0
-        new_scores = dict()
-        for word in adjlist:
-            new_scores[word] = (1-damp)+damp*sum(adjlist[other][word]*scores[other] for other in adjlist[word])
-            if scores[word] != new_scores[word]:
-                cnt += 1
-        print "Done (%d/%d)" %(cnt, len(scores))
-        if 0 == cnt:
-            break
-        else:
-            scores = new_scores
-    words = sorted([(word,score) for word,score in scores.items()],
-            cmp = lambda x,y: cmp(y[1], x[1]))
-    with codecs.open(rank_path, 'w', 'utf-8') as fout:
-        json.dump(words, fout)
-    print "TextRank is done."
+    _text_rank(adjlist)
 
 def get_word_ranks():
     if not os.path.exists(rank_path):
@@ -426,7 +448,7 @@ def _gen_train_data():
                 if 0 == len(segs):
                     flag = False
                     break
-                keyword = reduce(lambda x,y: x if ranks[x]<=ranks[y] else y, segs)
+                keyword = reduce(lambda x,y: x if ranks[x] < ranks[y] else y, segs)
                 rows[-1].append(keyword)
                 rows[-1].append(context)
                 context += sentence+' '
@@ -535,7 +557,7 @@ def _gen_lm_train_data():
                 if 0 == len(segs):
                     flag = False
                     break
-                keyword = reduce(lambda x,y: x if ranks[x]<=ranks[y] else y, segs)
+                keyword = reduce(lambda x,y: x if ranks[x] < ranks[y] else y, segs)
                 row.append(keyword)
             if flag:
                 data.append(row)

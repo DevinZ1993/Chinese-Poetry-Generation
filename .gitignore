@@ -1,4 +1,6 @@
 *.pyc
 show.py
 data/
+_data/
 save/
+_save/

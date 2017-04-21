@@ -5,6 +5,7 @@ from data_util import *
 import tensorflow as tf
 from tensorflow.contrib import rnn
 
+os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
 
 rnnlm_dir = os.path.join(save_dir, 'rnnlm')
 
@@ -84,22 +85,32 @@ class Planner:
     def train(self, sess):
         print "Start training RNNML ..."
         saver = tf.train.Saver(tf.global_variables())
-        init_op = tf.group(tf.global_variables_initializer(),
-                tf.local_variables_initializer())
-        sess.run(init_op)
-        for epoch in range(_NUM_EPOCHS):
-            cnt = 0
-            for _batch, _lengths in _batch_train_data():
-                print "[Training RNNLM] epoch = %d, processing line %d to %d ..." %(epoch, cnt, cnt+_BATCH_SIZE-1)
-                cnt += _BATCH_SIZE
-                inputs = _batch[:,:-1]
-                targets = _batch[:,1:]
-                sess.run([self.opt_op], feed_dict = {
-                    self.inputs: _batch[:,:-1],
-                    self.targets: _batch[:,1:],
-                    self.seq_length: _lengths})
-            saver.save(sess, rnnlm_path)
-        print "RNNML has been generated."
+        ckpt = tf.train.get_checkpoint_state(rnnlm_dir)
+        if not ckpt or not ckpt.model_checkpoint_path:
+            init_op = tf.group(tf.global_variables_initializer(),
+                    tf.local_variables_initializer())
+            sess.run(init_op)
+        else:
+            saver.restore(sess, ckpt.model_checkpoint_path)
+        try:
+            for epoch in range(_NUM_EPOCHS):
+                cnt = 0
+                for _batch, _lengths in _batch_train_data():
+                    print "[Training RNNLM] epoch = %d, processing line %d to %d ..." %(epoch, cnt, cnt+_BATCH_SIZE-1)
+                    cnt += _BATCH_SIZE
+                    inputs = _batch[:,:-1]
+                    targets = _batch[:,1:]
+                    sess.run([self.opt_op], feed_dict = {
+                        self.inputs: _batch[:,:-1],
+                        self.targets: _batch[:,1:],
+                        self.seq_length: _lengths})
+                    if 0 == cnt/_BATCH_SIZE%128:
+                        saver.save(sess, rnnlm_path)
+                        print "[Training RNNLM] Temporary model is saved."
+                saver.save(sess, rnnlm_path)
+            print "RNNML has been generated."
+        except KeyboardInterrupt:
+            print "\nRNNML training is interrupted."
 
     def _expand(self, words, num):
         def _get_probable_idx(vals, vect):

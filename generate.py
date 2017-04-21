@@ -4,10 +4,10 @@
 from data_util import *
 from collections import deque
 import math
-#import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import rnn, legacy_seq2seq
 
+os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
 
 model_dir = os.path.join(save_dir,'model')
 
@@ -31,14 +31,19 @@ _DECAY_RATE = 0.97
 def encode_sentence(sentence):
     return [_ch2int[ch] for ch in sentence]
 
-def _batch_train_data():
+def _batch_train_data(start_batch_no = 0, batch_num = (1<<31)-1):
+    batch_no = 0
     for sentences, keywords, contexts in batch_train_data(_BATCH_SIZE):
-        s_matrix = fill_np_matrix(map(encode_sentence, sentences), _BATCH_SIZE, _VOCAB_SIZE-1)
-        k_matrix = fill_np_matrix(map(encode_sentence, keywords), _BATCH_SIZE, _VOCAB_SIZE-1)
-        c_matrix = fill_np_matrix(map(encode_sentence, contexts), _BATCH_SIZE, _VOCAB_SIZE-1)
-        k_length = fill_np_array(map(len, keywords), _BATCH_SIZE, 0)
-        c_length = fill_np_array(map(len, contexts), _BATCH_SIZE, 0)
-        yield s_matrix, k_matrix, c_matrix, k_length, c_length
+        if batch_no >= start_batch_no:
+            s_matrix = fill_np_matrix(map(encode_sentence, sentences), _BATCH_SIZE, _VOCAB_SIZE-1)
+            k_matrix = fill_np_matrix(map(encode_sentence, keywords), _BATCH_SIZE, _VOCAB_SIZE-1)
+            c_matrix = fill_np_matrix(map(encode_sentence, contexts), _BATCH_SIZE, _VOCAB_SIZE-1)
+            k_length = fill_np_array(map(len, keywords), _BATCH_SIZE, 0)
+            c_length = fill_np_array(map(len, contexts), _BATCH_SIZE, 0)
+            yield s_matrix, k_matrix, c_matrix, k_length, c_length
+        batch_no += 1
+        if batch_no >= start_batch_no + batch_num:
+            break
 
 
 class TrieNode:
@@ -88,11 +93,15 @@ _root = _build_trie()
 
 _BEAM_SIZE = 10
 
-def _decode(rule, probs, length):
+def _decode(rule, probs, length, words, p_words):
     heads = map(lambda x:_int2ch[x], sorted(range(1,_VOCAB_SIZE-1),
             cmp = lambda x,y: cmp(probs[y], probs[x])))
     def _word_filter(word):
-        return (length <= 3 or 2 == len(word)) and rule.check(word)
+        return len(word) <= length and (length == 3 or len(word) <= 2) \
+                and rule.check(word) and word not in p_words \
+                and reduce(lambda x,ch: x and \
+                        reduce(lambda y,w: y and ch not in w, words, True),
+                        word, True)
     for i in range(0, len(heads), _BEAM_SIZE):
         results = []
         for j in range(i, min(len(heads), i+_BEAM_SIZE)):
@@ -106,6 +115,7 @@ def _decode(rule, probs, length):
                 if freqs[x] > freqs[result]:
                     result = x
             rule.accept(result)
+            words.append(result)
             return result
 
 
@@ -206,17 +216,20 @@ class Generator:
             h_states.append(np.concatenate([h_states_fw.popleft(), h_states_bw.pop()], axis=1))
         return np.stack(h_states, axis=1)
 
-    def train(self, sess):
+    def train(self, sess, batch_no = 0, batch_num = (1<<31)-1):
         print "Start training attention-based RNN enc-dec ..."
         saver = tf.train.Saver(tf.global_variables())
-        init_op = tf.group(tf.global_variables_initializer(),
-                tf.local_variables_initializer())
-        sess.run(init_op)
-        for epoch in range(_NUM_EPOCHS):
-            cnt = 0
-            for s_mat, k_mat, c_mat, k_len, c_len in _batch_train_data():
-                print "[Training Seq2Seq] epoch = %d, processing line %d to %d ..." %(epoch, cnt, cnt+_BATCH_SIZE-1)
-                cnt += _BATCH_SIZE
+        ckpt = tf.train.get_checkpoint_state(model_dir)
+        if not ckpt or not ckpt.model_checkpoint_path:
+            init_op = tf.group(tf.global_variables_initializer(),
+                    tf.local_variables_initializer())
+            sess.run(init_op)
+        else:
+            saver.restore(sess, ckpt.model_checkpoint_path)
+        try:
+            max_batch_no = batch_no + batch_num
+            for s_mat, k_mat, c_mat, k_len, c_len in _batch_train_data(batch_no, batch_num):
+                print "[Training Seq2Seq] Processing line %d to %d ..." %(batch_no*_BATCH_SIZE, (batch_no+1)*_BATCH_SIZE)
                 attention_states = self._get_attention_states(sess, k_mat, c_mat, k_len, c_len)
                 s_inputs = sess.run(tf.zeros([_BATCH_SIZE], tf.int32))
                 s_state = sess.run(self.s_cell.zero_state(_BATCH_SIZE, tf.float32))
@@ -227,10 +240,17 @@ class Generator:
                         self.attention_states: attention_states,
                         self.s_targets: s_mat[:,i:i+1]})
                     s_inputs = s_mat[:,i:i+1].reshape([-1])
-            saver.save(sess, model_path)
-        print "Training has finished."
+                batch_no += 1
+                if 0 == batch_no%128:
+                    saver.save(sess, model_path)
+                    print "[Training Seq2Seq] Temporary model is saved."
+                if batch_no >= max_batch_no:
+                    break
+            print "Training has finished."
+        except KeyboardInterrupt:
+            print "\nTraining is interrupted."
 
-    def _gen_sentence(self, sess, keyword, context, rule):
+    def _gen_sentence(self, sess, keyword, context, rule, p_words):
         k_mat = fill_np_matrix([encode_sentence(keyword)], _BATCH_SIZE, _VOCAB_SIZE-1)
         c_mat = fill_np_matrix([encode_sentence(context)], _BATCH_SIZE, _VOCAB_SIZE-1)
         k_len = fill_np_array([len(keyword)], _BATCH_SIZE, 0)
@@ -245,8 +265,7 @@ class Generator:
                 self.s_inputs: s_inputs,
                 self.s_init_state: s_state,
                 self.attention_states: attention_states})
-            word = _decode(rule, _logits.tolist()[0], rule.n_chars-idx)
-            words.append(word)
+            word = _decode(rule, _logits.tolist()[0], rule.n_chars-idx, words, p_words)
             _mat = fill_np_matrix([encode_sentence(word)], _BATCH_SIZE, _VOCAB_SIZE-1)
             for i in range(len(word)-1):
                 s_state, _ = sess.run([self.s_final_state, self.logits], feed_dict = {
@@ -255,6 +274,7 @@ class Generator:
                     self.attention_states: attention_states})
             s_inputs = _mat[:,-1].reshape([-1])
             idx += len(word)
+        p_words.extend(words)
         return u''.join(words)
 
     def generate(self, keywords):
@@ -267,8 +287,9 @@ class Generator:
                 ckpt = tf.train.get_checkpoint_state(model_dir)
             saver.restore(sess, ckpt.model_checkpoint_path)
             context = u''
+            p_words = []
             for keyword in keywords:
-                sentence = self._gen_sentence(sess, keyword, context, rule)
+                sentence = self._gen_sentence(sess, keyword, context, rule, p_words)
                 uprintln(sentence)
                 context += sentence+' '
             
