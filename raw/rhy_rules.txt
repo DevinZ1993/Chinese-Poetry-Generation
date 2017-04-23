@@ -1,0 +1,7 @@
+5	ppzzP	zzzpP	zzppz	ppzzP
+5	zzppz	ppzpP	pppzz	zzzpP
+5	pppzz	zzzpP	zzppz	ppzzP
+7	zzppzzp	ppzzzpP	ppzzppz	zzppzzP
+7	ppzzzpP	zzppzzP	zzpppzz	ppzzzpP
+7	zzpppzz	ppzzzpP	ppzzppz	zzppzzP
+7	ppzzppz	zzppzzP	zzpppzz	ppzzzpP
