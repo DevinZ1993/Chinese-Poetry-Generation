@@ -50,6 +50,8 @@ Now, type the following command and wait for several hours:
 
     python train.py
 
+![train](img/train.png)
+
 ## Run Tests
 
 Start the user interaction program in a terminal once the training has finished:
@@ -58,4 +60,4 @@ Start the user interaction program in a terminal once the training has finished:
 
 Type in an input sentence each time and the poem generator will create a poem for you.
 
-![screenshot](etc/screenshot.png)
+![main](img/main.png)
