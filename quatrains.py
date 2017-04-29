@@ -2,7 +2,6 @@
 #-*- coding:utf-8 -*-
 
 from utils import *
-from segment import Segmenter
 from corpus import get_all_corpus
 from vocab import get_vocab
 
@@ -19,16 +18,14 @@ def is_quatrain(poem):
 
 
 def get_quatrains():
-    segmenter = Segmenter()
-    _, word2int = get_vocab()
+    _, ch2int = get_vocab()
     def quatrain_filter(poem):
         if not is_quatrain(poem):
             return False
         else:
             for sentence in poem['sentences']:
-                segs = segmenter.segment(sentence)
-                for seg in segs:
-                    if seg not in word2int:
+                for ch in sentence:
+                    if ch not in ch2int:
                         return False
             return True
     return filter(quatrain_filter, get_all_corpus())

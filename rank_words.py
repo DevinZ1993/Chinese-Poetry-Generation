@@ -11,13 +11,13 @@ stopwords_raw = os.path.join(raw_dir, 'stopwords.txt')
 rank_path = os.path.join(data_dir, 'word_ranks.json')
 
 
-def _get_stopwords():
+def get_stopwords():
     stopwords = set()
     with codecs.open(stopwords_raw, 'r', 'utf-8') as fin:
-        line = fin.readline().strip()
+        line = fin.readline()
         while line:
-            stopwords.add(line)
-            line = fin.readline().strip()
+            stopwords.add(line.strip())
+            line = fin.readline()
     return stopwords
 
 
@@ -59,7 +59,7 @@ def _text_rank(adjlist):
 
 def _rank_all_words():
     segmenter = Segmenter()
-    stopwords = _get_stopwords()
+    stopwords = get_stopwords()
     print "Start TextRank over the selected quatrains ..."
     quatrains = get_quatrains()
     adjlist = dict()

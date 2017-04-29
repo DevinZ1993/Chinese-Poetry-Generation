@@ -24,7 +24,7 @@ def _gen_sxhy_dict():
                         if len(tok) < 4:
                             tok_list.append(tok)
                         else:
-                            tok_list.extend(list(jieba.cut(tok, HMM=True)))
+                            tok_list.extend(jieba.lcut(tok, HMM=True))
                     for tok in tok_list:
                         sxhy_dict[tok] = tag
             line = fin.readline().strip()
@@ -58,7 +58,7 @@ class Segmenter:
         elif 1 == len(sentence):
             return [sentence]
         elif 2 == len(sentence):
-            return [sentence] if sentence in self._sxhy_dict else list(jieba.cut(sentence, HMM=True))
+            return [sentence] if sentence in self._sxhy_dict else jieba.lcut(sentence, HMM=True)
         else:
             segs = []
             for i in range(0, len(sentence), 2):
@@ -70,11 +70,11 @@ class Segmenter:
                     elif sentence[i:i+2] not in self._sxhy_dict and sentence[i+1:] in self._sxhy_dict:
                         segs.extend([sentence[i:i+1], sentence[i+1:]])
                     else:
-                        segs.extend(list(jieba.cut(sentence[i:], HMM=True)))
+                        segs.extend(jieba.lcut(sentence[i:], HMM=True))
                     break
                 elif sentence[i:i+2] in self._sxhy_dict:
                     segs.append(sentence[i:i+2])
                 else:
-                    segs.extend(jieba.cut(sentence[i:i+2], HMM=True))
+                    segs.extend(jieba.lcut(sentence[i:i+2], HMM=True))
             return filter(lambda seg: len(seg) > 0, segs)
 
