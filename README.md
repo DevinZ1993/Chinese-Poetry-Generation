@@ -40,7 +40,8 @@ To begin with, you should process the raw data to generate the training data:
     python data_utils.py
 
 The TextRank algorithm may take many hours to run.
-Instead, you could choose to stop it early by typing ctrl+C to interrupt the iterations.
+Instead, you could choose to stop it early by typing ctrl+c to interrupt the iterations,
+when the progress shown in the terminal has remained stationary for a long time.
 
 Then, generate the word embedding data using gensim Word2Vec model:
 
