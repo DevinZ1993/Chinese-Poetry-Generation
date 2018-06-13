@@ -1,80 +1,69 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 #-*- coding:utf-8 -*-
 
-from utils import *
+from common import *
 import jieba
 
+_raw_sxhy_path = os.path.join(raw_dir, 'shixuehanying.txt')
 
-sxhy_raw = os.path.join(raw_dir, 'shixuehanying.txt')
-sxhy_path = os.path.join(data_dir, 'sxhy_dict.txt')
+_sxhy_path = os.path.join(data_dir, 'sxhy_dict.txt')
 
 def _gen_sxhy_dict():
-    sxhy_dict = dict()
-    with codecs.open(sxhy_raw, 'r', 'utf-8') as fin:
-        line = fin.readline().strip()
-        while line:
-            if line.startswith('<begin>'):
-                tag = line.split('\t')[2]
-            elif not line.startswith('<end>'):
-                toks = line.split('\t')
-                if len(toks) == 3:
-                    toks = toks[2].split(' ')
-                    tok_list = []
-                    for tok in toks:
-                        if len(tok) < 4:
-                            tok_list.append(tok)
-                        else:
-                            tok_list.extend(jieba.lcut(tok, HMM=True))
-                    for tok in tok_list:
-                        sxhy_dict[tok] = tag
-            line = fin.readline().strip()
-    with codecs.open(sxhy_path, 'w', 'utf-8') as fout:
-        for word in sxhy_dict:
-            fout.write(word+'\n')
-
-if not os.path.exists(sxhy_path):
-    _gen_sxhy_dict()
-jieba.load_userdict(sxhy_path)
+    print("Parsing shixuehanying dictionary ...")
+    words = set()
+    with open(_raw_sxhy_path, 'r') as fin:
+        for line in fin.readlines():
+            if line[0] == '<':
+                continue
+            for phrase in line.strip().split()[1:]:
+                if not is_cn_sentence(phrase):
+                    continue
+                idx = 0
+                while idx + 4 <= len(phrase):
+                    # Cut 2 chars each time.
+                    words.add(phrase[idx : idx + 2])
+                    idx += 2
+                # Use jieba to cut the last 3 chars.
+                if idx < len(phrase):
+                    for word in jieba.lcut(phrase[idx:]):
+                        words.add(word)
+    with open(_sxhy_path, 'w') as fout:
+        fout.write(' '.join(words))
 
 
-def get_sxhy_dict():
-    sxhy_dict = set()
-    with codecs.open(sxhy_path, 'r', 'utf-8') as fin:
-        line = fin.readline()
-        while line:
-            sxhy_dict.add(line.strip())
-            line = fin.readline()
-    return sxhy_dict
-
-
-class Segmenter:
+class Segmenter(object):
 
     def __init__(self):
-        self._sxhy_dict = get_sxhy_dict()
+        if not os.path.exists(_sxhy_path):
+            _gen_sxhy_dict()
+        with open(_sxhy_path, 'r') as fin:
+            self.sxhy_dict = set(fin.read().split())
 
     def segment(self, sentence):
-        if 0 == len(sentence):
-            return []
-        elif 1 == len(sentence):
-            return [sentence]
-        elif 2 == len(sentence):
-            return [sentence] if sentence in self._sxhy_dict else jieba.lcut(sentence, HMM=True)
-        else:
-            segs = []
-            for i in range(0, len(sentence), 2):
-                if i+3 == len(sentence):
-                    if sentence[i:] in self._sxhy_dict:
-                        segs.append(sentence[i:])
-                    elif sentence[i:i+2] in self._sxhy_dict and sentence[i+1:] not in self._sxhy_dict:
-                        segs.extend([sentence[i:i+2], sentence[i+2:]])
-                    elif sentence[i:i+2] not in self._sxhy_dict and sentence[i+1:] in self._sxhy_dict:
-                        segs.extend([sentence[i:i+1], sentence[i+1:]])
-                    else:
-                        segs.extend(jieba.lcut(sentence[i:], HMM=True))
-                    break
-                elif sentence[i:i+2] in self._sxhy_dict:
-                    segs.append(sentence[i:i+2])
-                else:
-                    segs.extend(jieba.lcut(sentence[i:i+2], HMM=True))
-            return filter(lambda seg: len(seg) > 0, segs)
+        toks = []
+        idx = 0
+        while idx + 4 <= len(sentence):
+            # Cut 2 chars each time.
+            if sentence[idx : idx + 2] in self.sxhy_dict:
+                toks.append(sentence[idx : idx + 2])
+            else:
+                for tok in jieba.lcut(sentence[idx : idx + 2]):
+                    toks.append(tok)
+            idx += 2
+        # Cut last 3 chars.
+        if idx < len(sentence):
+            if sentence[idx : ] in self.sxhy_dict:
+                toks.append(sentence[idx : ])
+            else:
+                for tok in jieba.lcut(sentence[idx : ]):
+                    toks.append(tok)
+        return toks
 
+
+# For testing purpose.
+if __name__ == '__main__':
+    segmenter = Segmenter()
+    with open(os.path.join(raw_dir, 'qts_tab.txt'), 'r') as fin:
+        for line in fin.readlines()[1 : ]:
+            for sentence in split_sentences(line.strip().split()[3]):
+                print(' '.join(segmenter.segment(sentence)))
