@@ -39,3 +39,4 @@ def split_sentences(text):
     return sentences
 
 NUM_OF_SENTENCES = 4
+CHAR_VEC_DIM = 512

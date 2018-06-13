@@ -30,6 +30,8 @@ class RankedWords(Singleton):
             self._do_text_rank()
         with open(_wordrank_path, 'r') as fin:
             self.word_scores = json.load(fin)
+        self.word2rank = dict((word_score[0], rank) 
+                for rank, word_score in enumerate(self.word_scores))
 
     def _do_text_rank(self):
         print("Do text ranking ...")
@@ -113,6 +115,14 @@ class RankedWords(Singleton):
 
     def __iter__(self):
         return iter(self.word_scores)
+
+    def __contains__(self, word):
+        return word in self.word2rank
+
+    def get_rank(self, word):
+        if word not in self.word2rank:
+            return len(self.word2rank)
+        return self.word2rank[word]
 
 
 # For testing purpose.

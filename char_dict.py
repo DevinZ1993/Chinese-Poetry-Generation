@@ -31,7 +31,7 @@ def _gen_char_dict():
 
     # Store most popular chars into the file.
     with open(_dict_path, 'w') as fout:
-        for i in range(min(MAX_DICT_SIZE, len(cnt2char))):
+        for i in range(min(MAX_DICT_SIZE - 1, len(cnt2char))):
             fout.write(cnt2char[i][0])
 
 
@@ -48,6 +48,9 @@ class CharDict(Singleton):
                 self._int2char.append(ch)
                 self._char2int[ch] = idx
                 idx += 1
+            # Add end-of-sentence symbol.
+            self._int2char.append('$')
+            self._char2int['$'] = idx
 
     def char2int(self, ch):
         if ch not in self._char2int:
@@ -56,6 +59,13 @@ class CharDict(Singleton):
 
     def int2char(self, idx):
         return self._int2char[idx]
+
+    def __len__(self):
+        return len(self._int2char)
+
+    def __iter__(self):
+        return iter(self._int2char)
+
 
 
 # For testing purpose.
