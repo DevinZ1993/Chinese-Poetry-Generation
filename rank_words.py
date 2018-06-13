@@ -1,101 +1,122 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 #-*- coding:utf-8 -*-
 
-from utils import *
-from segment import Segmenter, get_sxhy_dict
-from quatrains import get_quatrains
+from common import *
+from singleton import Singleton
+from segment import Segmenter
+from poems import Poems
+import json
+
+_stopwords_path = os.path.join(raw_dir, 'stopwords.txt')
+
+_wordrank_path = os.path.join(data_dir, 'wordrank.txt')
+
+_damp = 0.85
 
 
-stopwords_raw = os.path.join(raw_dir, 'stopwords.txt')
-
-rank_path = os.path.join(data_dir, 'word_ranks.json')
-
-
-def get_stopwords():
+def _get_stopwords():
     stopwords = set()
-    with codecs.open(stopwords_raw, 'r', 'utf-8') as fin:
-        line = fin.readline()
-        while line:
+    with open(_stopwords_path, 'r') as fin:
+        for line in fin.readlines():
             stopwords.add(line.strip())
-            line = fin.readline()
     return stopwords
 
 
-def _text_rank(adjlist):
-    damp = 0.85
-    scores = dict((word,1.0) for word in adjlist)
-    try:
-        for i in xrange(100000):
-            print "[TextRank] Start iteration %d ..." %i,
+class RankedWords(Singleton):
+
+    def __init__(self):
+        self.stopwords = _get_stopwords()
+        if not os.path.exists(_wordrank_path):
+            self._do_text_rank()
+        with open(_wordrank_path, 'r') as fin:
+            self.word_scores = json.load(fin)
+
+    def _do_text_rank(self):
+        print("Do text ranking ...")
+        adjlists = self._get_adjlists()
+        print("[TextRank] Total words: %d" % len(adjlists))
+
+        # Value initialization.
+        scores = dict()
+        for word in adjlists:
+            scores[word] = [1.0, 1.0]
+
+        # Synchronous value iterations.
+        itr = 0
+        while True:
+            sys.stdout.write("[TextRank] Iteration %d ..." % itr)
             sys.stdout.flush()
-            cnt = 0
-            new_scores = dict()
-            for word in adjlist:
-                new_scores[word] = (1-damp)+damp*sum(adjlist[other][word]*scores[other] \
-                        for other in adjlist[word])
-                if scores[word] != new_scores[word]:
-                    cnt += 1
-            print "Done (%d/%d)" %(cnt, len(scores))
-            if 0 == cnt:
+            for word, adjlist in adjlists.items():
+                scores[word][1] = (1.0 - _damp) + _damp * \
+                        sum(adjlists[other][word] * scores[other][0] 
+                                for other in adjlist)
+            eps = 0
+            for word in scores:
+                eps = max(eps, abs(scores[word][0] - scores[word][1]))
+                scores[word][0] = scores[word][1]
+            print(" eps = %f" % eps)
+            if eps <= 1e-6:
                 break
-            else:
-                scores = new_scores
-        print "TextRank is done."
-    except KeyboardInterrupt:
-        print "\nTextRank is interrupted."
-    sxhy_dict = get_sxhy_dict()
-    def _compare_words(a, b):
-        if a[0] in sxhy_dict and b[0] not in sxhy_dict:
-            return -1
-        elif a[0] not in sxhy_dict and b[0] in sxhy_dict:
-            return 1
-        else:
-            return cmp(b[1], a[1])
-    words = sorted([(word,score) for word,score in scores.items()],
-            cmp = _compare_words)
-    with codecs.open(rank_path, 'w', 'utf-8') as fout:
-        json.dump(words, fout)
+            itr += 1
+
+        # Score-based comparison with ShiXueHanYing as a tie-breaker.
+        segmenter = Segmenter()
+        def cmp_key(x):
+            word, score = x
+            return (-score, 0 if word in segmenter.sxhy_dict else 1)
+        words = sorted([(word, score[0]) for word, score in scores.items()], 
+                key = cmp_key)
+
+        # Store ranked words and scores.
+        with open(_wordrank_path, 'w') as fout:
+            json.dump(words, fout)
+
+    def _get_adjlists(self):
+        print("[TextRank] Generating word graph ...")
+        segmenter = Segmenter()
+        poems = Poems()
+        adjlists = dict()
+        # Count number of co-occurrence.
+        for poem in poems:
+            for sentence in poem:
+                words = []
+                for word in segmenter.segment(sentence):
+                    if word not in self.stopwords:
+                        words.append(word)
+                for word in words:
+                    if word not in adjlists:
+                        adjlists[word] = dict()
+                for i in range(len(words)):
+                    for j in range(i + 1, len(words)):
+                        if words[j] not in adjlists[words[i]]:
+                            adjlists[words[i]][words[j]] = 1.0
+                        else:
+                            adjlists[words[i]][words[j]] += 1.0
+                        if words[i] not in adjlists[words[j]]:
+                            adjlists[words[j]][words[i]] = 1.0
+                        else:
+                            adjlists[words[j]][words[i]] += 1.0
+        # Normalize weights.
+        for a in adjlists:
+            sum_w = sum(w for _, w in adjlists[a].items())
+            for b in adjlists[a]:
+                adjlists[a][b] /= sum_w
+        return adjlists
+
+    def __getitem__(self, index):
+        if index < 0 or index >= len(self.word_scores):
+            return None
+        return self.word_scores[index]
+
+    def __len__(self):
+        return len(self.word_scores)
+
+    def __iter__(self):
+        return iter(self.word_scores)
 
 
-def _rank_all_words():
-    segmenter = Segmenter()
-    stopwords = get_stopwords()
-    print "Start TextRank over the selected quatrains ..."
-    quatrains = get_quatrains()
-    adjlist = dict()
-    for idx, poem in enumerate(quatrains):
-        if 0 == (idx+1)%10000:
-            print "[TextRank] Scanning %d/%d poems ..." %(idx+1, len(quatrains))
-        for sentence in poem['sentences']:
-            segs = filter(lambda word: word not in stopwords,
-                    segmenter.segment(sentence))
-            for seg in segs:
-                if seg not in adjlist:
-                    adjlist[seg] = dict()
-            for i, seg in enumerate(segs):
-                for _, other in enumerate(segs[i+1:]):
-                    if seg != other:
-                        adjlist[seg][other] = adjlist[seg][other]+1 \
-                                if other in adjlist[seg] else 1.0
-                        adjlist[other][seg] = adjlist[other][seg]+1 \
-                                if seg in adjlist[other] else 1.0
-    for word in adjlist:
-        w_sum = sum(weight for other, weight in adjlist[word].items())
-        for other in adjlist[word]:
-            adjlist[word][other] /= w_sum
-    print "[TextRank] Weighted graph has been built."
-    _text_rank(adjlist)
-
-
-def get_word_ranks():
-    if not os.path.exists(rank_path):
-        _rank_all_words()
-    with codecs.open(rank_path, 'r', 'utf-8') as fin:
-        ranks = json.load(fin)
-    return dict((pair[0], idx) for idx, pair in enumerate(ranks))
-
-
+# For testing purpose.
 if __name__ == '__main__':
-    ranks = get_word_ranks()
-    print "Size of word_ranks: %d" % len(ranks)
-
+    ranked_words = RankedWords()
+    for i in range(100):
+        print(ranked_words[i])

@@ -47,6 +47,12 @@ class Poems(Singleton):
             return None
         return self.poems[index]
 
+    def __len__(self):
+        return len(self.poems)
+
+    def __iter__(self):
+        return iter(self.poems)
+
 
 # For testing purpose.
 if __name__ == '__main__':
