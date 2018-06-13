@@ -2,6 +2,7 @@
 #-*- coding:utf-8 -*-
 
 from common import *
+from singleton import Singleton
 import jieba
 
 _raw_sxhy_path = os.path.join(raw_dir, 'shixuehanying.txt')
@@ -31,7 +32,7 @@ def _gen_sxhy_dict():
         fout.write(' '.join(words))
 
 
-class Segmenter(object):
+class Segmenter(Singleton):
 
     def __init__(self):
         if not os.path.exists(_sxhy_path):
@@ -64,6 +65,6 @@ class Segmenter(object):
 if __name__ == '__main__':
     segmenter = Segmenter()
     with open(os.path.join(raw_dir, 'qts_tab.txt'), 'r') as fin:
-        for line in fin.readlines()[1 : ]:
+        for line in fin.readlines()[1 : 6]:
             for sentence in split_sentences(line.strip().split()[3]):
                 print(' '.join(segmenter.segment(sentence)))

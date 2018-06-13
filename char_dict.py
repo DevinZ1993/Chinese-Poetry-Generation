@@ -2,6 +2,7 @@
 #-*- coding:utf-8 -*-
 
 from common import *
+from singleton import Singleton
 import os
 
 MAX_DICT_SIZE = 6000
@@ -34,7 +35,7 @@ def _gen_char_dict():
             fout.write(cnt2char[i][0])
 
 
-class CharDict(object):
+class CharDict(Singleton):
 
     def __init__(self):
         if not os.path.exists(_dict_path):
@@ -49,6 +50,8 @@ class CharDict(object):
                 idx += 1
 
     def char2int(self, ch):
+        if ch not in self._char2int:
+            return -1
         return self._char2int[ch]
 
     def int2char(self, idx):
