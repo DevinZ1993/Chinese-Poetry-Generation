@@ -4,15 +4,16 @@
 import sys
 import os
 
-data_dir = 'data'
+root_dir = os.path.dirname(__file__)
+data_dir = os.path.join(root_dir, 'data')
 raw_dir = os.path.join(data_dir, 'raw')
-save_dir = 'save'
+save_dir = os.path.join(root_dir, 'save')
 
 plan_data_path = os.path.join(data_dir, 'plan_data.txt')
 gen_data_path = os.path.join(data_dir, 'gen_data.txt')
 
-plan_model_path = os.path.join(save_dir, 'plan_model.txt')
-gen_model_path = os.path.join(save_dir, 'gen_model.txt')
+plan_model_path = os.path.join(save_dir, 'plan_model.bin')
+gen_model_path = os.path.join(save_dir, 'gen_model.bin')
 
 # Test if a char is a Chinese character.
 def is_cn_char(ch):

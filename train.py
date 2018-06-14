@@ -1,23 +1,25 @@
-#! /usr/bin/env python
-# -*- coding:utf-8 -*-
+#! /usr/bin/env python3
+#-*- coding:utf-8 -*-
 
-from utils import *
-from data_utils import *
-from generate import Generator
-from time import sleep
+from common import *
+from generate import train_generator
+from gensim import models
+from plan import train_planner
+import argparse
 
 
 if __name__ == '__main__':
-    generator = Generator()
-    learn_rate = 0.002
-    decay_rate = 0.97
-    epoch_no = 0
-    epoch_step = 5
-    while True:
-        generator.train(n_epochs = epoch_step,
-                learn_rate = learn_rate*decay_rate**epoch_no,
-                decay_rate = decay_rate)
-        epoch_no += epoch_step
-        print "[Train] %d epochs have finished: 60s cool down ..." %epoch_no
-        sleep(60)
+    parser = argparse.ArgumentParser(description = 'Chinese poem generation.')
+    parser.add_argument('-p', dest = 'planner', default = False, 
+            action = 'store_true', help = 'train planning model')
+    parser.add_argument('-g', dest = 'generator', default = False, 
+            action = 'store_true', help = 'train generation model')
+    parser.add_argument('-a', dest = 'all', default = False,
+            action = 'store_true', help = 'train both models')
+    args = parser.parse_args()
+    if args.all or args.planner:
+        train_planner()
+    if args.all or args.generator:
+        train_generator()
+    print("All training is done!")
 

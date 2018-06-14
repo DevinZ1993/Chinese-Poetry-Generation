@@ -61,11 +61,11 @@ class RankedWords(Singleton):
                 break
             itr += 1
 
-        # Score-based comparison with ShiXueHanYing as a tie-breaker.
+        # Dictionary-based comparison with TextRank score as a tie-breaker.
         segmenter = Segmenter()
         def cmp_key(x):
             word, score = x
-            return (-score, 0 if word in segmenter.sxhy_dict else 1)
+            return (0 if word in segmenter.sxhy_dict else 1, -score)
         words = sorted([(word, score[0]) for word, score in scores.items()], 
                 key = cmp_key)
 
@@ -108,13 +108,13 @@ class RankedWords(Singleton):
     def __getitem__(self, index):
         if index < 0 or index >= len(self.word_scores):
             return None
-        return self.word_scores[index]
+        return self.word_scores[index][0]
 
     def __len__(self):
         return len(self.word_scores)
 
     def __iter__(self):
-        return iter(self.word_scores)
+        return map(lambda x: x[0], self.word_scores)
 
     def __contains__(self, word):
         return word in self.word2rank
