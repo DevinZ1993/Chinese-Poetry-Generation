@@ -1,13 +1,13 @@
 #! /usr/bin/env python3
 #-*- coding:utf-8 -*-
 
-from common import *
+from check_file import char_dict_path, file_uptodate
 from singleton import Singleton
+from utils import *
 import os
 
-MAX_DICT_SIZE = 6000
 
-_dict_path = os.path.join(data_dir, 'char_dict.txt')
+MAX_DICT_SIZE = 6000
 
 _corpus_list = ['qts_tab.txt', 'qss_tab.txt', 'qsc_tab.txt', 'qtais_tab.txt',
         'yuan.all', 'ming.all', 'qing.all']
@@ -30,27 +30,30 @@ def _gen_char_dict():
     cnt2char = sorted(char_cnts.items(), key = lambda x: -x[1])
 
     # Store most popular chars into the file.
-    with open(_dict_path, 'w') as fout:
-        for i in range(min(MAX_DICT_SIZE - 1, len(cnt2char))):
+    with open(char_dict_path, 'w') as fout:
+        for i in range(min(MAX_DICT_SIZE - 2, len(cnt2char))):
             fout.write(cnt2char[i][0])
 
 
 class CharDict(Singleton):
 
     def __init__(self):
-        if not os.path.exists(_dict_path):
+        if not file_uptodate(char_dict_path):
             _gen_char_dict()
         self._int2char = []
         self._char2int = dict()
-        with open(_dict_path, 'r') as fin:
-            idx = 0
+        # Add start-of-sentence symbol.
+        self._int2char.append('^')
+        self._char2int['^'] = 0
+        with open(char_dict_path, 'r') as fin:
+            idx = 1
             for ch in fin.read():
                 self._int2char.append(ch)
                 self._char2int[ch] = idx
                 idx += 1
-            # Add end-of-sentence symbol.
-            self._int2char.append('$')
-            self._char2int['$'] = idx
+        # Add end-of-sentence symbol.
+        self._int2char.append('$')
+        self._char2int['$'] = len(self._int2char) - 1
 
     def char2int(self, ch):
         if ch not in self._char2int:

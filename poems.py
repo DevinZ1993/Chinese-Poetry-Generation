@@ -1,11 +1,11 @@
 #! /usr/bin/env python3
 # -*- coding:utf-8 -*-
 
-from common import *
-from singleton import Singleton
 from char_dict import CharDict
+from check_file import poems_path, file_uptodate
+from singleton import Singleton
+from utils import *
 
-_poem_path = os.path.join(data_dir, 'poem.txt')
 
 _corpus_list = ['qts_tab.txt', 'qss_tab.txt', 'qtais_tab.txt',
         'yuan.all', 'ming.all', 'qing.all']
@@ -14,7 +14,7 @@ _corpus_list = ['qts_tab.txt', 'qss_tab.txt', 'qtais_tab.txt',
 def _gen_poems():
     print("Parsing poems ...")
     char_dict = CharDict()
-    with open(_poem_path, 'w') as fout:
+    with open(poems_path, 'w') as fout:
         for corpus in _corpus_list:
             with open(os.path.join(raw_dir, corpus), 'r') as fin:
                 for line in fin.readlines()[1 : ]:
@@ -35,10 +35,10 @@ def _gen_poems():
 class Poems(Singleton):
 
     def __init__(self):
-        if not os.path.exists(_poem_path):
+        if not file_uptodate(poems_path):
             _gen_poems()
         self.poems = []
-        with open(_poem_path, 'r') as fin:
+        with open(poems_path, 'r') as fin:
             for line in fin.readlines():
                 self.poems.append(line.strip().split())
 

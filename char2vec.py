@@ -1,15 +1,15 @@
 #! /usr/bin/env python3
 # -*- coding:utf-8 -*-
 
-from common import *
-from singleton import Singleton
 from char_dict import CharDict
-from poems import Poems
-import numpy as np
-from numpy.random import uniform
+from check_file import char2vec_path, file_uptodate
 from gensim import models
+from numpy.random import uniform
+from poems import Poems
+from singleton import Singleton
+from utils import *
+import numpy as np
 
-_char2vec_path = os.path.join(data_dir, 'char2vec.npy')
 
 def _gen_char2vec():
     print("Generating char2vec model ...")
@@ -20,15 +20,15 @@ def _gen_char2vec():
     for i, ch in enumerate(char_dict):
         if ch in model.wv:
             embedding[i, :] = model.wv[ch]
-    np.save(_char2vec_path, embedding)
+    np.save(char2vec_path, embedding)
 
 
 class Char2Vec(Singleton):
 
     def __init__(self):
-        if not os.path.exists(_char2vec_path):
+        if not file_uptodate(char2vec_path):
             _gen_char2vec()
-        self.embedding = np.load(_char2vec_path)
+        self.embedding = np.load(char2vec_path)
         self.char_dict = CharDict()
 
     def get_embedding(self):
@@ -36,6 +36,10 @@ class Char2Vec(Singleton):
 
     def get_vect(self, ch):
         return self.char2vec[self.char2int(ch)]
+
+    def get_vects(self, text):
+        return np.stack(map(self.get_vect, text)) if len(text) > 0 \
+                else np.reshape(np.array([[]]), [0, CHAR_VEC_DIM])
 
 
 # For testing purpose.

@@ -1,41 +1,38 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 # -*- coding:utf-8 -*-
 
-import codecs
 import sys
 import os
-import json
-import random
-import numpy as np
+
+root_dir = os.path.dirname(__file__)
+data_dir = os.path.join(root_dir, 'data')
+raw_dir = os.path.join(data_dir, 'raw')
+save_dir = os.path.join(root_dir, 'save')
 
 
-raw_dir = 'raw'
-data_dir = 'data'
-save_dir = 'save'
-
-if not os.path.exists(data_dir):
-    os.mkdir(data_dir)
-if not os.path.exists(save_dir):
-    os.mkdir(save_dir)
-
-
-def uprint(x):
-    print repr(x).decode('unicode-escape'),
-
-def uprintln(x):
-    print repr(x).decode('unicode-escape')
-
-def is_CN_char(ch):
+def is_cn_char(ch):
+    """ Test if a char is a Chinese character. """
     return ch >= u'\u4e00' and ch <= u'\u9fa5'
 
-def split_sentences(line):
+def is_cn_sentence(sentence):
+    """ Test if a sentence is made of Chinese characters. """
+    for ch in sentence:
+        if not is_cn_char(ch):
+            return False
+    return True
+
+def split_sentences(text):
+    """ Split a piece of text into a list of sentences. """
     sentences = []
     i = 0
-    for j in range(len(line)+1):
-        if j == len(line) or line[j] in [u'，', u'。', u'！', u'？', u'、']:
+    for j in range(len(text) + 1):
+        if j == len(text) or \
+                text[j] in [u'，', u'。', u'！', u'？', u'、', u'\n']:
             if i < j:
-                sentence = u''.join(filter(is_CN_char, line[i:j]))
+                sentence = u''.join(filter(is_cn_char, text[i:j]))
                 sentences.append(sentence)
-            i = j+1
+            i = j + 1
     return sentences
 
+NUM_OF_SENTENCES = 4
+CHAR_VEC_DIM = 512

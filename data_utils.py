@@ -1,13 +1,14 @@
 #! /usr/bin/env python3
 #-*- coding:utf-8 -*-
 
-from common import *
-from segment import Segmenter
+from check_file import gen_data_path, plan_data_path, file_uptodate
 from poems import Poems
 from rank_words import RankedWords
-import subprocess
+from segment import Segmenter
+from utils import *
 import argparse
 import re
+import subprocess
 
 
 def gen_train_data():
@@ -49,6 +50,29 @@ def gen_train_data():
             fout.write(line)
 
 
+def batch_train_data(batch_size):
+    """ Training data generator for the poem generator."""
+    if not file_uptodate(gen_data_path):
+        print("Warning: training data is not found!")
+        gen_train_data()
+    keywords = []
+    contexts = []
+    sentences = []
+    with open(gen_data_path, 'r') as fin:
+        for line in fin.readlines():
+            toks = line.strip().split('\t')
+            sentences.append(toks[0])
+            keywords.append(toks[1])
+            contexts.append(toks[2] if len(toks) == 3 else '')
+            if len(keywords) == batch_size:
+                yield keywords, contexts, sentences
+                keywords.clear()
+                contexts.clear()
+                sentences.clear()
+        if len(keywords) > 0:
+            yield keywords, contets, sentences
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description = 'Training data generation.')
     parser.add_argument('--clean', dest = 'clean', default = False, 
@@ -63,5 +87,7 @@ if __name__ == '__main__':
                 stdout = sys.stdout)
         subprocess.run(args=["./rank_words.py"], check = True, 
                 stdout = sys.stdout)
-    gen_train_data()
+    if not file_uptodate(plan_data_path) or \
+            not file_uptodate(gen_data_path):
+        gen_train_data()
 

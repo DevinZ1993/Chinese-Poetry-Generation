@@ -1,15 +1,15 @@
 #! /usr/bin/env python3
 #-*- coding:utf-8 -*-
 
-from common import *
-from singleton import Singleton
-from segment import Segmenter
+from check_file import wordrank_path, file_uptodate
 from poems import Poems
+from segment import Segmenter
+from singleton import Singleton
+from utils import *
 import json
 
 _stopwords_path = os.path.join(raw_dir, 'stopwords.txt')
 
-_wordrank_path = os.path.join(data_dir, 'wordrank.txt')
 
 _damp = 0.85
 
@@ -26,9 +26,9 @@ class RankedWords(Singleton):
 
     def __init__(self):
         self.stopwords = _get_stopwords()
-        if not os.path.exists(_wordrank_path):
+        if not file_uptodate(wordrank_path):
             self._do_text_rank()
-        with open(_wordrank_path, 'r') as fin:
+        with open(wordrank_path, 'r') as fin:
             self.word_scores = json.load(fin)
         self.word2rank = dict((word_score[0], rank) 
                 for rank, word_score in enumerate(self.word_scores))
@@ -70,7 +70,7 @@ class RankedWords(Singleton):
                 key = cmp_key)
 
         # Store ranked words and scores.
-        with open(_wordrank_path, 'w') as fout:
+        with open(wordrank_path, 'w') as fout:
             json.dump(words, fout)
 
     def _get_adjlists(self):

@@ -1,8 +1,8 @@
 #! /usr/bin/env python3
 #-*- coding:utf-8 -*-
 
-from common import *
-from generate import train_generator
+from utils import *
+from generate import Generator
 from gensim import models
 from plan import train_planner
 import argparse
@@ -20,6 +20,7 @@ if __name__ == '__main__':
     if args.all or args.planner:
         train_planner()
     if args.all or args.generator:
-        train_generator()
+        generator = Generator()
+        generator.train()
     print("All training is done!")
 

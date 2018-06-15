@@ -1,18 +1,18 @@
 #! /usr/bin/env python3
 #-*- coding:utf-8 -*-
 
-from common import *
+from check_file import sxhy_path, file_uptodate
 from singleton import Singleton
+from utils import *
 import jieba
 
-_raw_sxhy_path = os.path.join(raw_dir, 'shixuehanying.txt')
+_rawsxhy_path = os.path.join(raw_dir, 'shixuehanying.txt')
 
-_sxhy_path = os.path.join(data_dir, 'sxhy_dict.txt')
 
 def _gen_sxhy_dict():
     print("Parsing shixuehanying dictionary ...")
     words = set()
-    with open(_raw_sxhy_path, 'r') as fin:
+    with open(_rawsxhy_path, 'r') as fin:
         for line in fin.readlines():
             if line[0] == '<':
                 continue
@@ -28,19 +28,20 @@ def _gen_sxhy_dict():
                 if idx < len(phrase):
                     for word in jieba.lcut(phrase[idx:]):
                         words.add(word)
-    with open(_sxhy_path, 'w') as fout:
+    with open(sxhy_path, 'w') as fout:
         fout.write(' '.join(words))
 
 
 class Segmenter(Singleton):
 
     def __init__(self):
-        if not os.path.exists(_sxhy_path):
+        if not file_uptodate(sxhy_path):
             _gen_sxhy_dict()
-        with open(_sxhy_path, 'r') as fin:
+        with open(sxhy_path, 'r') as fin:
             self.sxhy_dict = set(fin.read().split())
 
     def segment(self, sentence):
+        # TODO: try CRF-based segmentation.
         toks = []
         idx = 0
         while idx + 4 <= len(sentence):
