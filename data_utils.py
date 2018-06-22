@@ -1,12 +1,10 @@
 #! /usr/bin/env python3
 #-*- coding:utf-8 -*-
 
-from check_file import gen_data_path, plan_data_path, file_uptodate
+from paths import gen_data_path, plan_data_path, check_uptodate
 from poems import Poems
 from rank_words import RankedWords
 from segment import Segmenter
-from utils import *
-import argparse
 import re
 import subprocess
 
@@ -15,6 +13,7 @@ def gen_train_data():
     print("Generating training data ...")
     segmenter = Segmenter()
     poems = Poems()
+    poems.shuffle()
     ranked_words = RankedWords()
     plan_data = []
     gen_data = []
@@ -52,7 +51,7 @@ def gen_train_data():
 
 def batch_train_data(batch_size):
     """ Training data generator for the poem generator."""
-    if not file_uptodate(gen_data_path):
+    if not check_uptodate(gen_data_path):
         print("Warning: training data is not found!")
         gen_train_data()
     keywords = []
@@ -70,24 +69,11 @@ def batch_train_data(batch_size):
                 contexts.clear()
                 sentences.clear()
         if len(keywords) > 0:
-            yield keywords, contets, sentences
+            yield keywords, contexts, sentences
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description = 'Training data generation.')
-    parser.add_argument('--clean', dest = 'clean', default = False, 
-            action = 'store_true', help = 'clean all processed data')
-    args = parser.parse_args()
-    if args.clean:
-        for f in os.listdir(data_dir):
-            if not re.match('raw', f):
-                print("Delete %s." % os.path.join(data_dir, f))
-                os.remove(os.path.join(data_dir, f))
-        subprocess.run(args=["./char2vec.py"], check = True, 
-                stdout = sys.stdout)
-        subprocess.run(args=["./rank_words.py"], check = True, 
-                stdout = sys.stdout)
-    if not file_uptodate(plan_data_path) or \
-            not file_uptodate(gen_data_path):
+    if not check_uptodate(plan_data_path) or \
+            not check_uptodate(gen_data_path):
         gen_train_data()
 

@@ -1,23 +1,26 @@
 #! /usr/bin/env python3
 #-*- coding:utf-8 -*-
 
-from check_file import plan_data_path, file_uptodate
 from data_utils import gen_train_data
 from gensim import models
+from paths import save_dir, plan_data_path, check_uptodate
 from random import random, shuffle
 from rank_words import RankedWords
 from singleton import Singleton
-from utils import *
+from utils import split_sentences, NUM_OF_SENTENCES
 import jieba
+import os
+
 
 _plan_model_path = os.path.join(save_dir, 'plan_model.bin')
+
 
 def train_planner():
     # TODO: try other keyword-expansion models.
     print("Training Word2Vec-based planner ...")
     if not os.path.exists(save_dir):
         os.mkdir(save_dir)
-    if not file_uptodate(plan_data_path):
+    if not check_uptodate(plan_data_path):
         gen_train_data()
     word_lists = []
     with open(plan_data_path, 'r') as fin:

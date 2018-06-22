@@ -2,9 +2,11 @@
 # -*- coding:utf-8 -*-
 
 from char_dict import CharDict
-from check_file import poems_path, file_uptodate
+from paths import raw_dir, poems_path, check_uptodate
+from random import shuffle
 from singleton import Singleton
-from utils import *
+from utils import split_sentences
+import os
 
 
 _corpus_list = ['qts_tab.txt', 'qss_tab.txt', 'qtais_tab.txt',
@@ -35,7 +37,7 @@ def _gen_poems():
 class Poems(Singleton):
 
     def __init__(self):
-        if not file_uptodate(poems_path):
+        if not check_uptodate(poems_path):
             _gen_poems()
         self.poems = []
         with open(poems_path, 'r') as fin:
@@ -52,6 +54,9 @@ class Poems(Singleton):
 
     def __iter__(self):
         return iter(self.poems)
+
+    def shuffle(self):
+        shuffle(self.poems)
 
 
 # For testing purpose.

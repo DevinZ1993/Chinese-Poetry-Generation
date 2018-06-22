@@ -1,12 +1,14 @@
 #! /usr/bin/env python3
 #-*- coding:utf-8 -*-
 
-from check_file import wordrank_path, file_uptodate
+from paths import raw_dir, wordrank_path, check_uptodate
 from poems import Poems
 from segment import Segmenter
 from singleton import Singleton
-from utils import *
 import json
+import os
+import sys
+
 
 _stopwords_path = os.path.join(raw_dir, 'stopwords.txt')
 
@@ -22,11 +24,13 @@ def _get_stopwords():
     return stopwords
 
 
+# TODO: try other keyword-extraction algorithms. This doesn't work well.
+
 class RankedWords(Singleton):
 
     def __init__(self):
         self.stopwords = _get_stopwords()
-        if not file_uptodate(wordrank_path):
+        if not check_uptodate(wordrank_path):
             self._do_text_rank()
         with open(wordrank_path, 'r') as fin:
             self.word_scores = json.load(fin)
@@ -130,3 +134,4 @@ if __name__ == '__main__':
     ranked_words = RankedWords()
     for i in range(100):
         print(ranked_words[i])
+

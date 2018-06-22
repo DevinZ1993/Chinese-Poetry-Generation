@@ -1,9 +1,9 @@
 #! /usr/bin/env python3
 #-*- coding:utf-8 -*-
 
-from check_file import char_dict_path, file_uptodate
+from paths import raw_dir, char_dict_path, check_uptodate
 from singleton import Singleton
-from utils import *
+from utils import is_cn_char
 import os
 
 
@@ -38,7 +38,7 @@ def _gen_char_dict():
 class CharDict(Singleton):
 
     def __init__(self):
-        if not file_uptodate(char_dict_path):
+        if not check_uptodate(char_dict_path):
             _gen_char_dict()
         self._int2char = []
         self._char2int = dict()

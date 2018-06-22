@@ -1,14 +1,6 @@
 #! /usr/bin/env python3
 # -*- coding:utf-8 -*-
 
-import sys
-import os
-
-root_dir = os.path.dirname(__file__)
-data_dir = os.path.join(root_dir, 'data')
-raw_dir = os.path.join(data_dir, 'raw')
-save_dir = os.path.join(root_dir, 'save')
-
 
 def is_cn_char(ch):
     """ Test if a char is a Chinese character. """
@@ -36,3 +28,4 @@ def split_sentences(text):
 
 NUM_OF_SENTENCES = 4
 CHAR_VEC_DIM = 512
+

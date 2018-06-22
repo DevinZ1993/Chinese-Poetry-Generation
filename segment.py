@@ -1,10 +1,12 @@
 #! /usr/bin/env python3
 #-*- coding:utf-8 -*-
 
-from check_file import sxhy_path, file_uptodate
+from paths import raw_dir, sxhy_path, check_uptodate
 from singleton import Singleton
-from utils import *
+from utils import is_cn_sentence, split_sentences
 import jieba
+import os
+
 
 _rawsxhy_path = os.path.join(raw_dir, 'shixuehanying.txt')
 
@@ -35,7 +37,7 @@ def _gen_sxhy_dict():
 class Segmenter(Singleton):
 
     def __init__(self):
-        if not file_uptodate(sxhy_path):
+        if not check_uptodate(sxhy_path):
             _gen_sxhy_dict()
         with open(sxhy_path, 'r') as fin:
             self.sxhy_dict = set(fin.read().split())
@@ -69,3 +71,4 @@ if __name__ == '__main__':
         for line in fin.readlines()[1 : 6]:
             for sentence in split_sentences(line.strip().split()[3]):
                 print(' '.join(segmenter.segment(sentence)))
+

@@ -1,11 +1,17 @@
 #! /usr/bin/env python3
 # -*- coding:utf-8 -*-
 
-from utils import *
+from char2vec import Char2Vec
+from char_dict import CharDict
+from data_utils import batch_train_data
+from paths import save_dir
+from random import random
 from singleton import Singleton
+from utils import CHAR_VEC_DIM, NUM_OF_SENTENCES
+import numpy as np
 import os
-import tensorflow as tf
 import sys
+import tensorflow as tf
 
 
 _BATCH_SIZE = 128
@@ -14,83 +20,176 @@ _NUM_UNITS = 512
 _model_path = os.path.join(save_dir, 'model')
 
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+
 class Generator(Singleton):
 
-    def _construct_graph(self):
-        # Encode the keyword into a vector with BiGRU.
-        self.keyword = tf.placeholder(tf.int32, 
-                [_BATCH_SIZE, None, CHAR_VEC_DIM])
+    def _encode_keyword(self):
+        """ Encode keyword into a vector."""
+        self.keyword = tf.placeholder(
+                shape = [_BATCH_SIZE, None, CHAR_VEC_DIM],
+                dtype = tf.float32, 
+                name = "keyword")
+        self.keyword_length = tf.placeholder(
+                shape = [_BATCH_SIZE],
+                dtype = tf.int32,
+                name = "keyword_length")
         _, kw_enc_states = tf.nn.bidirectional_dynamic_rnn(
-                tf.contrib.rnn.GRUCell(_NUM_UNITS / 2),
-                tf.contrib.rnn.GRUCell(_NUM_UNITS / 2),
+                cell_fw = tf.contrib.rnn.GRUCell(_NUM_UNITS / 2),
+                cell_bw = tf.contrib.rnn.GRUCell(_NUM_UNITS / 2),
                 inputs = self.keyword,
-                dtype = tf.float32, time_major = False)
-        keyword_state = tf.concat(kw_enc_states, axis = 1)
+                sequence_length = self.keyword_length,
+                dtype = tf.float32, 
+                time_major = False,
+                scope = "keyword_encoder")
+        keyword_state = tf.stack(
+                values = [tf.concat(kw_enc_states, axis = 1)], 
+                axis = 1)
+        tf.TensorShape([_BATCH_SIZE, 1, _NUM_UNITS]).\
+                assert_same_rank(keyword_state.shape)
+        return keyword_state
 
-        # Encode the context into a sequence of vectors with BiGRU, 
-        #   preceded by the keyword vector.
-        self.context = tf.placeholder(tf.int32, 
-                [_BATCH_SIZE, None, CHAR_VEC_DIM])
-        context_outputs, _ = tf.nn.bidirectional_dynamic_rnn(
-                tf.contrib.rnn.GRUCell(_NUM_UNITS / 2),
-                tf.contrib.rnn.GRUCell(_NUM_UNITS / 2),
+    def _encode_context(self):
+        """ Encode context into a list of vectors. """
+        self.context = tf.placeholder(
+                shape = [_BATCH_SIZE, None, CHAR_VEC_DIM],
+                dtype = tf.float32, 
+                name = "context")
+        self.context_length = tf.placeholder(
+                shape = [_BATCH_SIZE],
+                dtype = tf.int32,
+                name = "context_length")
+        context_outputs, _ = tf.nn.dynamic_rnn(
+                cell = tf.contrib.rnn.GRUCell(_NUM_UNITS),
                 inputs = self.context,
-                dtype = tf.float32, time_major = False)
-        encoder_outputs = tf.concat([keyword_state, context_outputs], axis = 1)
+                sequence_length = self.context_length,
+                dtype = tf.float32, 
+                time_major = False,
+                scope = "context_encoder")
+        tf.TensorShape([_BATCH_SIZE, None, _NUM_UNITS]).\
+                assert_same_rank(context_outputs.shape)
+        return context_outputs
 
-        # LSTM decoder with attention mechanism.
-        self.decoder_inputs = tf.placeholder(tf.int32, 
-                [_BATCH_SIZE, None, CHAR_VEC_DIM])
-        attention_mechanism = tf.contrib.seq2seq.BahdanauAttention(_NUM_UNITS, 
-                encoder_outputs)
+    def _build_attention(self, keyword_state, context_outputs):
+        """ Concatenate keyword and context vectors to build attention. """
+        encoder_outputs = tf.concat(
+                values = [keyword_state, context_outputs], 
+                axis = 1)
+        encoder_output_length = tf.add(self.context_length,
+                tf.ones(shape = [_BATCH_SIZE], dtype = tf.int32))
+        attention = tf.contrib.seq2seq.BahdanauAttention(
+                num_units = _NUM_UNITS, 
+                memory = encoder_outputs,
+                memory_sequence_length = encoder_output_length)
+        return attention
+
+    def _decode(self, attention):
+        """ Decode attention and reshape into [?, _NUM_UNITS]. """
         decoder_cell = tf.contrib.seq2seq.AttentionWrapper(
-                tf.contrib.rnn.LSTMCell(_NUM_UNITS),
-                attention_mechanism, attention_size = _NUM_UNITS)
-        self.decoder_state = decoder_cell.zero_state()
+                cell = tf.contrib.rnn.GRUCell(_NUM_UNITS),
+                attention_mechanism = attention)
+        self.decoder_state = decoder_cell.zero_state(
+                batch_size = _BATCH_SIZE, dtype = tf.float32)
+        self.decoder_inputs = tf.placeholder(
+                shape = [_BATCH_SIZE, None, CHAR_VEC_DIM],
+                dtype = tf.float32, 
+                name = "decoder_inputs")
+        self.decoder_input_length = tf.placeholder(
+                shape = [_BATCH_SIZE],
+                dtype = tf.int32,
+                name = "decoder_input_length")
         decoder_outputs, self.decoder_final_state = tf.nn.dynamic_rnn(
                 cell = decoder_cell,
-                inputs = self.sentence,
+                inputs = self.decoder_inputs,
+                sequence_length = self.decoder_input_length,
                 initial_state = self.decoder_state,
-                dtype = tf.float32, time_major = False)
+                dtype = tf.float32, 
+                time_major = False,
+                scope = "decoder")
+        tf.TensorShape([_BATCH_SIZE, None, _NUM_UNITS]).\
+                assert_same_rank(decoder_outputs.shape)
+        return self._reshape_decoder_outputs(decoder_outputs)
 
-        # Generate output distribution with softmax.
+    def _reshape_decoder_outputs(self, decoder_outputs):
+        """ Reshape decoder_outputs into shape [?, _NUM_UNITS]. """
+        def concat_output_slices(idx, val):
+            output_slice = tf.slice(
+                    input_ = decoder_outputs,
+                    begin = [idx, 0, 0],
+                    size = [1, self.decoder_input_length[idx],  _NUM_UNITS])
+            return tf.add(idx, 1),\
+                    tf.concat([val, tf.squeeze(output_slice, axis = 0)], 
+                            axis = 0)
+        tf_i = tf.constant(0)
+        tf_v = tf.zeros(shape = [0, _NUM_UNITS], dtype = tf.float32)
+        _, reshaped_outputs = tf.while_loop(
+                cond = lambda i, v: i < _BATCH_SIZE,
+                body = concat_output_slices,
+                loop_vars = [tf_i, tf_v],
+                shape_invariants = [tf.TensorShape([]),
+                    tf.TensorShape([None, _NUM_UNITS])])
+        tf.TensorShape([None, _NUM_UNITS]).\
+                assert_same_rank(reshaped_outputs.shape)
+        return reshaped_outputs
+
+    def _calculate_logits(self, reshaped_outputs):
+        """ Calculate logits of decoder outputs. """
         softmax_w = tf.Variable(
-                tf.constant(0.0, shape = [_NUM_UNITS, VOCAB_SIZE]), 
+                tf.random_normal(shape = [_NUM_UNITS, len(self.char_dict)],
+                    mean = 0.0, stddev = 0.08), 
                 trainable = True)
         softmax_b = tf.Variable(
-                tf.constant(0.0, shape = [VOCAB_SIZE]),
+                tf.random_normal(shape = [len(self.char_dict)],
+                    mean = 0.0, stddev = 0.08),
                 trainable = True)
-        reshaped_outputs = tf.reshape(decoder_outputs, [-1, _NUM_UNITS])
         logits = tf.nn.bias_add(
                 tf.matmul(reshaped_outputs, softmax_w),
                 bias = softmax_b)
-        self.probs = tf.nn.softmax(logits)
+        return logits
 
-        # Define cross-entropy loss.
-        self.targets = tf.placeholder(tf.int32, [_BATCH_SIZE, None])
-        reshaped_targets = tf.reshape(self.targets, [-1])
-        labels = tf.one_hot(reshaped_targets, depth = VOCAB_SIZE)
-        loss = tf.nn.softmax_cross_entropy_with_logits(
+    def _minimize_loss(self, logits):
+        """ Calculate loss and minimize it. """
+        self.targets = tf.placeholder(
+                shape = [None],
+                dtype = tf.int32, 
+                name = "targets")
+        labels = tf.one_hot(self.targets, depth = len(self.char_dict))
+        loss = tf.nn.softmax_cross_entropy_with_logits_v2(
                 logits = logits,
                 labels = labels)
         self.loss = tf.reduce_mean(loss)
 
-        # Define learning method.
-        self.global_step = tf.placeholder(tf.int32, trainable = False)
+        self.global_step = tf.placeholder(
+                dtype = tf.int32, name = "global_step")
         learning_rate = tf.train.exponential_decay(
-                learning_rate = 0.002, 
-                global_step = global_step,,
+                learning_rate = 0.05, 
+                global_step = self.global_step,
                 decay_steps = 1,
                 decay_rate = 0.97,
                 staircase = True)
         self.opt_op = tf.train.AdamOptimizer(learning_rate).\
-                minimize(self.loss, global_step = global_step)
+                minimize(self.loss)
+
+    def _construct_graph(self):
+        keyword_state = self._encode_keyword()
+        context_outputs = self._encode_context()
+
+        attention = self._build_attention(keyword_state, context_outputs)
+        decoder_outputs = self._decode(attention)
+
+        logits = self._calculate_logits(decoder_outputs)
+        self.probs = tf.nn.softmax(logits)
+
+        self._minimize_loss(logits)
 
     def __init__(self):
+        self.char_dict = CharDict()
+        self.char2vec = Char2Vec()
+        self._construct_graph()
         if not os.path.exists(save_dir):
             os.mkdir(save_dir)
         self.saver = tf.train.Saver(tf.global_variables())
-        self._construct_graph()
         self.trained = False
         
     def _initialize_session(self, session):
@@ -105,34 +204,43 @@ class Generator(Singleton):
 
     def generate(self, keywords):
         assert NUM_OF_SENTENCES == len(keywords)
+        context = ''
         with tf.Session() as session:
             self._initialize_session(session)
             if not self.trained:
                 print("Please train the model first! (./train.py -g)")
                 sys.exit(1)
-            context = ''
             for keyword in keywords:
+                keyword_data, keyword_length = self._fill_np_matrix([keyword])
+                context_data, context_length = self._fill_np_matrix([context])
                 char = '^'
                 while True:
+                    decoder_input, decoder_input_length = \
+                            self._fill_np_matrix([char])
                     encoder_feed_dict = {
-                            self.keyword = self.char2vec.get_vects(keyword),
-                            self.context = self.char2vec.get_vects(context),
-                            self.decoder_inputs = self.char2vec.get_vec(char),
+                            self.keyword : keyword_data,
+                            self.keyword_length : keyword_length,
+                            self.context : context_data,
+                            self.context_length : context_length,
+                            self.decoder_inputs : decoder_input,
+                            self.decoder_input_length : decoder_input_length
                             }
                     if char != '^':
                         encoder_feed_dict[self.decoder_state] = state
                     probs, state = session.run(
                             [self.probs, self.decoder_final_state], 
-                            feeed_dict = encoder_feed_dict)
-                    if np.argmax(probs) == len(self.char_dict) - 1:
-                        char = '$'
+                            feed_dict = encoder_feed_dict)
+                    prob_sums = np.cumsum(probs.tolist()[0])
+                    for i, prob_sum in enumerate(prob_sums):
+                        if random() < prob_sum:
+                            char = self.char_dict.int2char(i)
+                            break
+                    print(char)
+                    if char == '$':
                         break
-                    else:
-                        char = self.char_dict.int2char(np.argmax(probs))
-                        context += char
-                context += '$'
+        return context.split('$')
 
-    def train(self):
+    def train(self, n_epochs = 6):
         print("Training RNN-based generator ...")
         with tf.Session() as session:
             self._initialize_session(session)
@@ -146,7 +254,7 @@ class Generator(Singleton):
                                 (epoch, batch_no * _BATCH_SIZE,
                                 (batch_no + 1) * _BATCH_SIZE))
                         sys.stdout.flush()
-                        self._train_a_batch(session,
+                        self._train_a_batch(session, epoch,
                                 keywords, contexts, sentences)
                         batch_no += 1
                         if 0 == batch_no % 32:
@@ -156,44 +264,50 @@ class Generator(Singleton):
             except KeyboardInterrupt:
                 print("Training is interrupted.")
 
-    def _train_a_batch(self, session, keywords, contexts, sentences):
-        keyword_batch = self._fill_np_matrix(keywords)
-        context_batch = self._fill_np_matrix(contexts)
-        decoder_inputs = self._fill_np_matrix(
-                map(lambda line: '^' + line[:-1], sentences))
+    def _train_a_batch(self, session, epoch, keywords, contexts, sentences):
+        keyword_data, keyword_length = self._fill_np_matrix(keywords)
+        context_data, context_length = self._fill_np_matrix(contexts)
+        decoder_inputs, decoder_input_length  = self._fill_np_matrix(
+                ['^' + sentence[:-1] for sentence in sentences])
         targets = self._fill_targets(sentences)
         feed_dict = {
-                self.keyword = keyword_batch,
-                self.context = context_batch,
-                self.decoder_inputs = decoder_inputs,
-                self.targets = targets
+                self.global_step : epoch,
+                self.keyword : keyword_data,
+                self.keyword_length : keyword_length,
+                self.context : context_data,
+                self.context_length : context_length,
+                self.decoder_inputs : decoder_inputs,
+                self.decoder_input_length : decoder_input_length,
+                self.targets : targets
                 }
         loss, _ = session.run([self.loss, self.opt_op],
                 feed_dict = feed_dict)
-        print("loss = " % loss)
+        print(" loss =  %f" % loss)
 
     def _fill_np_matrix(self, texts):
         max_time = max(map(len, texts))
-        matrix = np.full([_BATCH_SIZE, max_time, CHAR_VEC_DIM], 
-                len(self.char_dict) - 1, dtype = np.int32)
+        matrix = np.zeros([_BATCH_SIZE, max_time, CHAR_VEC_DIM], 
+                dtype = np.int32)
+        for i in range(_BATCH_SIZE):
+            for j in range(max_time):
+                matrix[i, j, :] = self.char2vec.get_vect('$')
         for i, text in enumerate(texts):
             matrix[i, : len(text)] = self.char2vec.get_vects(text)
-        return matrix
+        seq_length = [len(texts[i]) if i < len(texts) else 0 \
+                for i in range(_BATCH_SIZE)]
+        return matrix, seq_length
 
-    def _fill_targest(self, sentences):
-        max_time = max(map(len, sentences))
-        matrix = np.full([_BATCH_SIZE, max_time], 
-                len(self.char_dict) - 1, dtype = np.int32)
-        for i, sentence in enumerate(sentences):
-            code_list = list(map(self.char_dict.char2int, sentence))
-            matrix[i, : len(sentence)] = np.array(code_list)
-        return matrix
+    def _fill_targets(self, sentences):
+        targets = []
+        for sentence in sentences:
+            targets.extend(map(self.char_dict.char2int, sentence))
+        return targets
 
 
 # For testing purpose.
 if __name__ == '__main__':
     generator = Generator()
-    keywords = ['春天', '桃花', '燕', '柳']
+    keywords = ['四时', '变', '雪', '新']
     poem = generator.generate(keywords)
     for sentence in poem:
         print(sentence)
