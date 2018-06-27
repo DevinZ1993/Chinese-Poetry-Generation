@@ -1,6 +1,7 @@
 #! /usr/bin/env python3
 #-*- coding:utf-8 -*-
 
+from char_dict import end_of_sentence, start_of_sentence
 from paths import gen_data_path, plan_data_path, check_uptodate
 from poems import Poems
 from rank_words import RankedWords
@@ -21,10 +22,13 @@ def gen_train_data():
         if len(poem) != 4:
             continue # Only consider quatrains.
         valid = True
-        context = ''
+        context = start_of_sentence()
         gen_lines = []
         keywords = []
         for sentence in poem:
+            if len(sentence) != 7:
+                valid = False
+                break
             words = list(filter(lambda seg: seg in ranked_words, 
                     segmenter.segment(sentence)))
             if len(words) == 0:
@@ -34,10 +38,11 @@ def gen_train_data():
             for word in words[1 : ]:
                 if ranked_words.get_rank(word) < ranked_words.get_rank(keyword):
                     keyword = word
-            gen_line = sentence + '$\t' + keyword + '\t' + context + '\n'
+            gen_line = sentence + end_of_sentence() + \
+                    '\t' + keyword + '\t' + context + '\n'
             gen_lines.append(gen_line)
             keywords.append(keyword)
-            context += sentence + '$'
+            context += sentence + end_of_sentence()
         if valid:
             plan_data.append('\t'.join(keywords) + '\n')
             gen_data.extend(gen_lines)
@@ -51,9 +56,7 @@ def gen_train_data():
 
 def batch_train_data(batch_size):
     """ Training data generator for the poem generator."""
-    if not check_uptodate(gen_data_path):
-        print("Warning: training data is not found!")
-        gen_train_data()
+    gen_train_data() # Shuffle data order and cool down CPU.
     keywords = []
     contexts = []
     sentences = []
@@ -62,14 +65,13 @@ def batch_train_data(batch_size):
             toks = line.strip().split('\t')
             sentences.append(toks[0])
             keywords.append(toks[1])
-            contexts.append(toks[2] if len(toks) == 3 else '')
+            contexts.append(toks[2])
             if len(keywords) == batch_size:
                 yield keywords, contexts, sentences
                 keywords.clear()
                 contexts.clear()
                 sentences.clear()
-        if len(keywords) > 0:
-            yield keywords, contexts, sentences
+        # For simplicity, only return full batches for now.
 
 
 if __name__ == '__main__':

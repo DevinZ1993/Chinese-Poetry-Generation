@@ -43,23 +43,28 @@ class Planner(Singleton):
 
     def _expand(self, keywords):
         if len(keywords) < NUM_OF_SENTENCES:
-            similars = self.model.wv.most_similar(positive = \
-                    filter(lambda w : w in self.model.wv, keywords))
-            # Sort similar words in decreasing similarity with some randomness.
-            similars = sorted(similars, key = lambda x: x[1] * random())
-            for similar in similars:
-                keywords.add(similar[0])
-                if len(keywords) == NUM_OF_SENTENCES:
-                    break
+            filtered_keywords = list(filter(lambda w : w in \
+                    self.model.wv,  keywords))
+            if len(filtered_keywords) > 0:
+                similars = self.model.wv.most_similar(
+                        positive = filtered_keywords)
+                # Sort similar words in decreasing similarity with randomness.
+                similars = sorted(similars, key = lambda x: x[1] * random())
+                for similar in similars:
+                    keywords.add(similar[0])
+                    if len(keywords) == NUM_OF_SENTENCES:
+                        break
             prob_sum = sum(1. / (i + 1) \
                     for i, word in enumerate(self.ranked_words) \
                     if word not in keywords)
+            rand_val = prob_sum * random()
             word_idx = 0
-            while len(keywords) < NUM_OF_SENTENCES and \
-                    word_idx < len(self.ranked_words):
+            s = 0
+            while len(keywords) < NUM_OF_SENTENCES \
+                    and word_idx < len(self.ranked_words):
                 word = self.ranked_words[word_idx]
-                if word not in keywords and \
-                        prob_sum * random() < 1. / (word_idx + 1):
+                s += 1.0 / (word_idx + 1)
+                if word not in keywords and rand_val < s:
                     keywords.add(word)
                 word_idx += 1
         results = list(keywords)

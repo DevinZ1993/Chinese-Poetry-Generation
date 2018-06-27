@@ -13,6 +13,12 @@ _corpus_list = ['qts_tab.txt', 'qss_tab.txt', 'qsc_tab.txt', 'qtais_tab.txt',
         'yuan.all', 'ming.all', 'qing.all']
 
 
+def start_of_sentence():
+    return '^'
+
+def end_of_sentence():
+    return '$'
+
 def _gen_char_dict():
     print("Generating dictionary from corpus ...")
     
@@ -43,8 +49,8 @@ class CharDict(Singleton):
         self._int2char = []
         self._char2int = dict()
         # Add start-of-sentence symbol.
-        self._int2char.append('^')
-        self._char2int['^'] = 0
+        self._int2char.append(start_of_sentence())
+        self._char2int[start_of_sentence()] = 0
         with open(char_dict_path, 'r') as fin:
             idx = 1
             for ch in fin.read():
@@ -52,8 +58,8 @@ class CharDict(Singleton):
                 self._char2int[ch] = idx
                 idx += 1
         # Add end-of-sentence symbol.
-        self._int2char.append('$')
-        self._char2int['$'] = len(self._int2char) - 1
+        self._int2char.append(end_of_sentence())
+        self._char2int[end_of_sentence()] = len(self._int2char) - 1
 
     def char2int(self, ch):
         if ch not in self._char2int:
@@ -69,6 +75,8 @@ class CharDict(Singleton):
     def __iter__(self):
         return iter(self._int2char)
 
+    def __contains__(self, ch):
+        return ch in self._char2int
 
 
 # For testing purpose.
