@@ -301,7 +301,7 @@ class Generator(Singleton):
     def _fill_np_matrix(self, texts):
         max_time = max(map(len, texts))
         matrix = np.zeros([_BATCH_SIZE, max_time, CHAR_VEC_DIM], 
-                dtype = np.int32)
+                dtype = np.float32)
         for i in range(_BATCH_SIZE):
             for j in range(max_time):
                 matrix[i, j, :] = self.char2vec.get_vect(end_of_sentence())
