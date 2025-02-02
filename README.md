@@ -1,99 +1,96 @@
-# Planning-based Poetry Generation
+# Chinese Poem Generator
 
-A classical Chinese quatrain generator based on the RNN encoder-decoder framework.
+An ML-based classical Chinese poem generator.
 
-Here I tried to implement the planning-based architecture purposed in 
-[Wang et al. 2016](https://arxiv.org/abs/1610.09889),
-whereas technical details might be different from the original paper.
-My purpose of making this was not to refine the neural network model and give better results by myself.
-Rather, I wish to <b>provide a simple framework as said in the paper along with
-convenient data processing toolkits</b> for all those who want to experiment their
-ideas on this interesting task.
+**Update: This was migrated into Python3 and TensorFlow 1.8 in Jun 2018.**
 
-By Jun 2018, this project has been refactored into Python3 using TensorFlow 1.8.
-
-## Code Organization
-
-![Structure of Code](img/structure.jpg)
-
-The diagram above illustrates major dependencies in
-this codebase in terms of either data or functionalities.
-Here I tried to organize code around data,
-and make every data processing module a singleton at runtime.
-Batch processing is only done when the produced result
-is either missing or outdated.
+**Update: This was migrated onto PyTorch from TensorFlow in Jan 2025.**
 
 
-## Dependencies
+## Components
 
-* Python 3.6.5
+* vocab.py: A set of characters and their pre-trained embeddings.
 
-* [Numpy 1.14.4](http://www.numpy.org/)
+* generator.py: A poem generator based on LSTM encoder-decoder.
 
-* [TensorFlow 1.8](https://www.tensorflow.org/)
-
-* [Jieba 0.39](https://github.com/fxsjy/jieba)
-
-* [Gensim 2.0.0](https://radimrehurek.com/gensim/)
+* discriminator.py: An LSTM-based classifier that distinguishes real poems
+from fake ones.
 
 
-## Data Processing
 
-Run the following command to generate training data from source text data:
+## To Install Dependencies
 
-    ./data_utils.py
+```
+python3 -m venv venv
+source venv/bin/activate
+pip3 install -r requirements.txt
+```
 
-Depending on your hardware, this can take you a cup of tea or over one hour.
-The keyword extraction is based on the TextRank algorithm,
-which can take a long time to converge.
 
 ## Training
 
-The poem planner was based on Gensim's Word2Vec module.
-To train it, simply run:
+To train the word embedding model:
 
-    ./train.py -p
+```
+python3 vocab.py
+```
 
-The poem generator was implemented as an enc-dec model with attention mechanism.
-To train it, type the following command:
+To train the generator model:
 
-    ./train.py -g
+```
+python3 generator.py
+```
 
-You can also choose to train the both models altogether by running:
+To train the discriminator model:
 
-    ./train.py -a
+```
+python3 discriminator.py
+```
 
-To erase all trained models, run:
+## Run Interactive Demos
 
-    ./train.py --clean
+```
+python3 demo.py
+```
 
+## Preliminary Results
 
-As it turned out, the attention-based generator model after refactor
-was really hard to train well.
-From my side, the average loss will typically stuck at ~5.6
-and won't go down any more.
-There should be considerable space to improve it.
+### Poem Generator
 
-## Run Tests
+Generate a poem given the first character of each sentence (藏头诗):
+```
+>>> 风和日丽鸟语花香
+风雨萧萧秋月明
+和风吹雨湿衣裳
+日暮东风吹柳絮
+丽晴春色满天涯
+鸟啼花落春风里
+语语春风满袖风
+花落花开不知处
+香风吹落柳丝丝
 
-Type the following command:
+>>> 精诚之至金石为开
+精神禀气在天涯
+诚是中原万事非
+之子何人知此意
+至今古道无人知
+金丸玉骨不可识
+石泉泉石无人知
+为君一醉一杯酒
+开尽桃花一万株
 
-    ./main.py
+```
 
-Then each time you type in a hint text in Chinese,
-it should return a kind of gibberish poem.
-It's up to you to decide how to improve the models and training methods
-to make them work better.
+### Word Embedding
 
-## Improve It
-
-* To add data processing tools, consider adding dependency configs into
-\_\_dependency\_dict in [paths.py](./paths.py).
-It helps you to automatically update processed data when it goes stale.
-
-* To improve the planning model,
-please refine the planner class in [plan.py](./plan.py).
-
-* To improve  the generation model,
-please refine the generator class in [generate.py](./generate.py).
+Search similar characters to a given character:
+```
+风: 飙飚吹飕飒
+花: 蕊红葩杏桃
+雪: 霜霰雨腊絮
+月: 蟾影皎夜魄
+鸟: 禽噪鸦鹂鸥
+鱼: 鳞鲤鲈脍虾
+虫: 蛩唧蟀啾蟋
+```
 

@@ -1,5 +1,5 @@
 *.pyc
-show.py
-data/
-save/
+*.swp
+gen_data/
+venv/
 .backup/
