@@ -288,8 +288,6 @@ class Generator:
                 .format(self._training_epoch, len(loss_vals), mean_loss,
                         statistics.stdev(loss_vals)))
             self._training_epoch += 1
-            # self.encoder.lr_sched.step()
-            # self.decoder.lr_sched.step()
             self._save_model()
         print('Finished training the LSTM poem generator.')
 
@@ -363,12 +361,16 @@ class Generator:
             yield buffer
 
     def _get_training_data(self) -> Iterator[tuple[str, str]]:
+        if self._training_epoch < _ALL_POEM_EPOCHS:
+            poem_filter = lambda p: True
+        else:
+            poem_filter = lambda p: corpus.is_qiyanjueju(
+                p) or corpus.is_qiyanlvshi(p)
         poems = list(
-            corpus.get_poems(lambda ch: ch in self.vocab, random_order=True))
-        if self._training_epoch >= _ALL_POEM_EPOCHS:
-            poems = list(
-                poem for poem in poems
-                if corpus.is_qiyanjueju(poem) or corpus.is_qiyanlvshi(poem))
+            filter(
+                poem_filter,
+                corpus.get_poems(lambda ch: ch in self.vocab,
+                                 random_order=True)))
         total_batches = math.ceil(
             sum(len(poem) for poem in poems) / _BATCH_SIZE)
         print(f'Batches per epoch: {total_batches}')
