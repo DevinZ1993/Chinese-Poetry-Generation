@@ -27,12 +27,11 @@ import vocab
 EMBEDDING_DIM: int = vocab.EMBEDDING_DIM
 MODEL_DIM: int = EMBEDDING_DIM
 
-_MODEL_PATH: str = os.path.join(corpus.GENDATA_PATH, 'lstm_500.pt')
+_MODEL_PATH: str = os.path.join(corpus.GENDATA_PATH, 'generator.pt')
 _MAX_CONTEXT_SENTENCES: int = 3
 _NUM_RNN_LAYERS: int = 4
 _ALL_POEM_EPOCHS: int = 2
 _QIYANSHI_EPOCHS: int = 4
-_TOTAL_NUM_EPOCHS: int = _ALL_POEM_EPOCHS + _QIYANSHI_EPOCHS
 _BATCH_SIZE: int = 64
 _NUM_BATCHES_FOR_LOGGING: int = 10
 _ALL_POEM_EOS_WEIGHT: float = 1.0
@@ -43,8 +42,12 @@ _FORCE_TRAINING: bool = False
 _MAX_SENTENCE_LEN: int = 11
 _BEAM_SIZE: int = 3
 _VISUALIZE_ATTENTION_WEIGHTS: bool = False
+_TRACK_MODEL_GRADIENTS: bool = False
 _TEACHER_FORCING: bool = False
 _ENABLE_EOS_HACK: bool = False
+_NUM_BATCHES_TO_SAVE_RL_MODEL: int = 100
+
+TOTAL_PRETRAINING_EPOCHS: int = _ALL_POEM_EPOCHS + _QIYANSHI_EPOCHS
 
 
 class Encoder(nn.Module):
@@ -209,35 +212,36 @@ class BeamSearchState:
 class Generator:
     """"An LSTM encoder-decoder poem generator."""
 
-    def __init__(self):
-        self.vocab = vocab.Vocab(EMBEDDING_DIM)
+    def __init__(self, vocab_dict: vocab.Vocab):
+        self.vocab = vocab_dict
         self.vocab_size = len(self.vocab)
         self.encoder = Encoder(self.vocab)
         self.decoder = Decoder(self.vocab)
-        self._training_epoch = 0
-        self._training_step = 0
+        self.training_epoch = 0
+        self.batch_no = 0
         if not _FORCE_TRAINING and os.path.exists(_MODEL_PATH):
             self._load_model()
-        self.summary_writer = tensorboard.SummaryWriter(
-            'gen_data/lstm_gradient')
+        if _TRACK_MODEL_GRADIENTS:
+            self.summary_writer = tensorboard.SummaryWriter(
+                'gen_data/generator_gradient')
         self.global_batch_idx = 0
-        if self._training_epoch < _TOTAL_NUM_EPOCHS:
+        if self.training_epoch < TOTAL_PRETRAINING_EPOCHS:
             self._train_model()
         self.encoder.eval()
         self.decoder.eval()
 
     def _load_model(self) -> None:
         checkpoint = torch.load(_MODEL_PATH, weights_only=True)
-        self._training_epoch = checkpoint.get('epoch', 0)
-        self._training_step = checkpoint.get('step', 0)
+        self.training_epoch = checkpoint.get('epoch', 0)
+        self.batch_no = checkpoint.get('batch', 0)
         load_model(self.encoder, 'encoder', checkpoint)
         load_model(self.decoder, 'decoder', checkpoint)
 
     def _save_model(self) -> None:
         checkpoint_path = f'{_MODEL_PATH}.tmp'
         checkpoint = {
-            'epoch': self._training_epoch,
-            'step': self._training_step,
+            'epoch': self.training_epoch,
+            'batch': self.batch_no,
         }
         save_model(self.encoder, 'encoder', checkpoint)
         save_model(self.decoder, 'decoder', checkpoint)
@@ -257,42 +261,51 @@ class Generator:
         self.encoder.train()
         self.decoder.train()
         self.target_weight = torch.ones(self.vocab_size)
-        while self._training_epoch < _TOTAL_NUM_EPOCHS:
-            print(f'Epoch #{self._training_epoch} ...')
+        while self.training_epoch < TOTAL_PRETRAINING_EPOCHS:
+            print(f'Epoch #{self.training_epoch} ...')
             loss_vals: list[float] = []
             encoder_grad_norm_sum: float = 0.0
             decoder_grad_norm_sum: float = 0.0
             for data_batch in self._get_training_data_batches():
                 self.encoder.optimizer.zero_grad()
                 self.decoder.optimizer.zero_grad()
-                loss_vals.append(self._calculate_batch_mean_loss(data_batch))
+                loss = self._calculate_batch_mean_loss(data_batch)
+                loss.backward()
+                if _TRACK_MODEL_GRADIENTS:
+                    self._track_model_gradients()
+                nn.utils.clip_grad_norm_(self.encoder.parameters(),
+                                         max_norm=5.0)
+                nn.utils.clip_grad_norm_(self.decoder.parameters(),
+                                         max_norm=5.0)
+                loss_vals.append(loss.item())
                 self.encoder.optimizer.step()
                 self.decoder.optimizer.step()
                 encoder_grad_norm_sum += grad_norm(self.encoder)
                 decoder_grad_norm_sum += grad_norm(self.decoder)
+                self.batch_no += 1
                 if len(loss_vals) % _NUM_BATCHES_FOR_LOGGING == 0:
                     loss_val = statistics.mean(
                         loss_vals[-_NUM_BATCHES_FOR_LOGGING:])
                     print('Epoch #{}, {} batches: loss = {}'.format(
-                        self._training_epoch, len(loss_vals), loss_val))
+                        self.training_epoch, len(loss_vals), loss_val))
                     encoder_grad_norm = encoder_grad_norm_sum / _NUM_BATCHES_FOR_LOGGING
                     encoder_grad_norm_sum = 0.0
                     print(f'\tencoder grad: {encoder_grad_norm}')
                     decoder_grad_norm = decoder_grad_norm_sum / _NUM_BATCHES_FOR_LOGGING
                     decoder_grad_norm_sum = 0.0
                     print(f'\tdecoder grad: {decoder_grad_norm}')
-                self._training_step += 1
             mean_loss = statistics.mean(loss_vals)
             print(
                 'Finished epoch #{} ({} batches in total): loss = {} (stdev={})'
-                .format(self._training_epoch, len(loss_vals), mean_loss,
+                .format(self.training_epoch, len(loss_vals), mean_loss,
                         statistics.stdev(loss_vals)))
-            self._training_epoch += 1
+            self.training_epoch += 1
+            self.batch_no = 0
             self._save_model()
         print('Finished training the LSTM poem generator.')
 
-    def _calculate_batch_mean_loss(self, data_batch: list[tuple[str,
-                                                                str]]) -> float:
+    def _calculate_batch_mean_loss(
+            self, data_batch: list[tuple[str, str]]) -> torch.Tensor:
         # Prepare model inputs.
         batch_size = len(data_batch)
         src_length = 0
@@ -340,15 +353,10 @@ class Generator:
         loss_weight = self.target_weight
         loss_weight[self.vocab.get_index_with_default(
             vocab.END_OF_SENTENCE)] = (_ALL_POEM_EOS_WEIGHT
-                                       if self._training_epoch else
+                                       if self.training_epoch else
                                        _QIYANSHI_EOS_WEIGHT)
         loss_function = nn.NLLLoss(weight=loss_weight, ignore_index=-1)
-        loss = loss_function(logits.view(-1, self.vocab_size), target.view(-1))
-        loss.backward()
-        self._track_model_gradients()
-        nn.utils.clip_grad_norm_(self.encoder.parameters(), max_norm=5.0)
-        nn.utils.clip_grad_norm_(self.decoder.parameters(), max_norm=5.0)
-        return loss.item()
+        return loss_function(logits.view(-1, self.vocab_size), target.view(-1))
 
     def _get_training_data_batches(self) -> Iterator[list[tuple[str, str]]]:
         buffer: list[tuple[str, str]] = []
@@ -361,7 +369,7 @@ class Generator:
             yield buffer
 
     def _get_training_data(self) -> Iterator[tuple[str, str]]:
-        if self._training_epoch < _ALL_POEM_EPOCHS:
+        if self.training_epoch < _ALL_POEM_EPOCHS:
             poem_filter = lambda p: True
         else:
             poem_filter = lambda p: corpus.is_qiyanjueju(
@@ -401,7 +409,7 @@ class Generator:
         """Generates a poem given the first character of each sentence (藏头诗)."""
 
         sentences: list[str] = []
-        for idx, sentence_head in enumerate(sentence_heads):
+        for sentence_head in sentence_heads:
             context = ''.join(
                 sentence + vocab.END_OF_SENTENCE for sentence in
                 sentences[max(0,
@@ -460,6 +468,7 @@ class Generator:
             state_candidates.sort()
             sentences.append(state_candidates[-1].prefix.replace(
                 vocab.END_OF_SENTENCE, ''))
+        # print(sentences)
         return sentences
 
     def show_teacher_forcing(self, poem: list[str], k: int) -> None:
@@ -499,10 +508,179 @@ class Generator:
                                                  target_prob, results[::-1]))
             sentences.append(sentence + vocab.END_OF_SENTENCE)
 
+    def train_rl_model(self, k_actions: int, m_rollouts: int,
+                       pretraining_weight: float, discriminator: Any) -> None:
+        self.encoder.train()
+        self.decoder.train()
+        self.target_weight = torch.ones(self.vocab_size)
+        print(f'Epoch #{self.training_epoch} (RL) ...')
+        poems = list(
+            filter(
+                lambda p: corpus.is_qiyanjueju(p) or corpus.is_qiyanlvshi(p),
+                corpus.get_poems(lambda ch: ch in self.vocab,
+                                 random_order=False)))
+        print(f'Total samples: {len(poems)}')
+        for poem in poems[self.batch_no:]:
+            self.encoder.optimizer.zero_grad()
+            self.decoder.optimizer.zero_grad()
+            loss = self._calculate_rl_loss(poem, k_actions, m_rollouts,
+                                           pretraining_weight, discriminator)
+            loss.backward()
+            print('loss = {}'.format(loss.item()))
+            if _TRACK_MODEL_GRADIENTS:
+                self._track_model_gradients()
+            nn.utils.clip_grad_norm_(self.encoder.parameters(), max_norm=5.0)
+            nn.utils.clip_grad_norm_(self.decoder.parameters(), max_norm=5.0)
+            self.encoder.optimizer.step()
+            self.decoder.optimizer.step()
+            self.batch_no += 1
+            if self.batch_no % _NUM_BATCHES_TO_SAVE_RL_MODEL == 0:
+                self._save_model()
+
+        self.training_epoch += 1
+        self.batch_no = 0
+        self._save_model()
+        self.encoder.eval()
+        self.decoder.eval()
+
+    def _calculate_rl_loss(self, poem: list[str], k_actions: int,
+                           m_rollouts: int, pretraining_weight: float,
+                           discriminator: Any) -> torch.Tensor:
+        rl_loss_vals: list[torch.Tensor] = []
+        sentences: list[str] = []
+        while len(sentences) < len(poem):
+            context = ''.join(
+                sentence + vocab.END_OF_SENTENCE for sentence in
+                sentences[max(0,
+                              len(sentences) - _MAX_CONTEXT_SENTENCES):])
+            if not context:
+                context = vocab.END_OF_SENTENCE
+            encoder_outputs, hidden_and_cell_states = self.encoder(
+                self.vocab.get_index_as_tensor(context).unsqueeze(0))
+            encoder_output_padding_mask = torch.zeros(1,
+                                                      len(context),
+                                                      dtype=torch.bool)
+            sentence = poem[len(sentences)][0]
+            while len(sentence) < _MAX_SENTENCE_LEN:
+                print(sentences, sentence)
+                # Perform the one-step inference.
+                inputs = self.vocab.get_index_as_tensor(sentence[-1])
+                outputs, hidden_and_cell_states = self.decoder(
+                    encoder_outputs=encoder_outputs,
+                    encoder_output_padding_mask=encoder_output_padding_mask,
+                    inputs=inputs,
+                    hidden_and_cell_states=hidden_and_cell_states)
+                log_probs = outputs[0, :]
+
+                # Keep the top-k actions.
+                log_prob_ch_idx_pairs: list[tuple[float, int]] = []
+                for idx in range(log_probs.shape[0]):
+                    heapq.heappush(log_prob_ch_idx_pairs,
+                                   (log_probs[idx].item(), idx))
+                    if len(log_prob_ch_idx_pairs) > k_actions:
+                        heapq.heappop(log_prob_ch_idx_pairs)
+
+                # Estimate the pseudo loss using the k actions.
+                action_samples: list[tuple[int, float, float]] = []
+                prob_sum = 0.0
+                for log_prob, ch_idx in log_prob_ch_idx_pairs:
+                    with torch.no_grad():
+                        state_action_value: float = statistics.mean(
+                            self._estimate_state_action_value(
+                                poem, sentences, sentence, self.vocab[ch_idx],
+                                discriminator) for _ in range(m_rollouts))
+                    action_samples.append(
+                        (ch_idx, math.exp(log_prob), state_action_value))
+                    prob_sum += action_samples[-1][1]
+                value_baseline = sum(
+                    prob / prob_sum * state_action_value
+                    for _, prob, state_action_value in action_samples)
+                rl_loss_vals.append(
+                    sum(prob / prob_sum *
+                        (value_baseline - state_action_value) *
+                        log_probs[ch_idx]
+                        for ch_idx, prob, state_action_value in action_samples))
+
+                # Apply only one of the k actions to the state.
+                ch: str | None = None
+                rand_val = random.uniform(0.0, prob_sum)
+                for ch_idx, prob, _ in action_samples:
+                    rand_val -= prob
+                    if rand_val <= 0.0:
+                        ch = self.vocab[ch_idx]
+                        break
+                assert ch is not None
+                if ch == vocab.END_OF_SENTENCE:
+                    break
+                sentence += ch
+            sentences.append(sentence)
+        rl_loss: torch.Tensor = torch.mean(torch.stack(rl_loss_vals), dim=0)
+
+        pretraining_data_batch: list[tuple[str, str]] = []
+        for idx in range(len(poem)):
+            context = ''.join(
+                sentence + vocab.END_OF_SENTENCE
+                for sentence in sentences[max(0, idx -
+                                              _MAX_CONTEXT_SENTENCES):])
+            if not context:
+                context = vocab.END_OF_SENTENCE
+            pretraining_data_batch.append((context, poem[idx]))
+        pretraining_loss: torch.Tensor = self._calculate_batch_mean_loss(
+            pretraining_data_batch)
+
+        return rl_loss + pretraining_weight * (pretraining_loss - rl_loss)
+
+    def _estimate_state_action_value(self, poem: list[str],
+                                     sentences: list[str], next_sentence: str,
+                                     next_ch: str, discriminator: Any) -> float:
+        rollout: list[str] = sentences.copy()
+        while len(rollout) < len(poem):
+            context = ''.join(
+                sentence + vocab.END_OF_SENTENCE for sentence in
+                sentences[max(0,
+                              len(sentences) - _MAX_CONTEXT_SENTENCES):])
+            if not context:
+                context = vocab.END_OF_SENTENCE
+            encoder_outputs, hidden_and_cell_states = self.encoder(
+                self.vocab.get_index_as_tensor(context).unsqueeze(0))
+            encoder_output_padding_mask = torch.zeros(1,
+                                                      len(context),
+                                                      dtype=torch.bool)
+            if len(rollout) == len(poem):
+                rollout.append(next_sentence + next_ch)
+            else:
+                rollout.append(poem[len(rollout)])
+            while len(rollout[-1]) < _MAX_SENTENCE_LEN:
+                inputs = self.vocab.get_index_as_tensor(rollout[-1][-1])
+                outputs, hidden_and_cell_states = self.decoder(
+                    encoder_outputs=encoder_outputs,
+                    encoder_output_padding_mask=encoder_output_padding_mask,
+                    inputs=inputs,
+                    hidden_and_cell_states=hidden_and_cell_states)
+                log_probs = outputs[0, :]
+                for i in range(1, log_probs.shape[0]):
+                    log_probs[i] += log_probs[i - 1]
+                rand_val = random.uniform(0.0, log_probs[-1].item())
+                min_idx = 0
+                max_idx = self.vocab_size - 1
+                while min_idx < max_idx:
+                    mid_idx = min_idx + (max_idx - min_idx) // 2
+                    if log_probs[mid_idx] >= rand_val:
+                        max_idx = mid_idx
+                    else:
+                        min_idx = mid_idx + 1
+                ch = self.vocab[mid_idx]
+                if ch == vocab.END_OF_SENTENCE:
+                    break
+                rollout[-1] += ch
+        return discriminator.evaluate(''.join(
+            sentence + vocab.END_OF_SENTENCE for sentence in rollout)).item()
+
 
 if __name__ == '__main__':
     common.global_init()
-    generator = Generator()
+    vocab_dict = vocab.Vocab(vocab.EMBEDDING_DIM)
+    generator = Generator(vocab_dict)
     rhyme = rhyme.Rhyme()
     for poem in corpus.get_poems(lambda ch: ch in generator.vocab,
                                  random_order=False):

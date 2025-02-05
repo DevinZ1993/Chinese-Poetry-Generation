@@ -16,6 +16,9 @@ An ML-based classical Chinese poem generator.
 * discriminator.py: An LSTM-based classifier that distinguishes real poems
 from fake ones.
 
+* train\_seq\_gan.py: A training program for a
+[SeqGAN model](https://arxiv.org/pdf/1609.05473) implementation.
+
 
 
 ## To Install Dependencies
@@ -45,6 +48,11 @@ To train the discriminator model:
 
 ```
 python3 discriminator.py
+
+```
+To train the SeqGAN model:
+```
+python3 train_seq_gan.py
 ```
 
 ## Run Interactive Demos

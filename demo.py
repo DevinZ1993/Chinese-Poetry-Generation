@@ -3,10 +3,12 @@
 
 import common
 import generator
+import vocab
 
 if __name__ == '__main__':
     common.global_init()
-    gen = generator.Generator()
+    vocab_dict = vocab.Vocab(vocab.EMBEDDING_DIM)
+    gen = generator.Generator(vocab_dict)
     while True:
         head = input('>>> ')
         poem = gen.generate(head)
