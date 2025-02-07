@@ -120,15 +120,18 @@ class Discriminator(nn.Module):
     def train_on_all_poems(
             self,
             generator: Any,
+            num_batches: int | None = None,
             poem_filter: Callable[[list[str]], bool] | None = None) -> None:
         self.train()
         self._train_on_single_epoch(
-            self._gen_pos_and_neg_samples_for_all_poems(generator, poem_filter))
+            self._gen_pos_and_neg_samples_for_all_poems(generator, num_batches,
+                                                        poem_filter))
         self.eval()
 
     def _gen_pos_and_neg_samples_for_all_poems(
         self,
         generator: Any,
+        num_batches: int | None,
         poem_filter: Callable[[list[str]], bool] | None = None
     ) -> Iterator[tuple[str, bool]]:
         if poem_filter is None:
@@ -138,6 +141,8 @@ class Discriminator(nn.Module):
                 poem_filter,
                 corpus.get_poems(lambda ch: ch in self.vocab,
                                  random_order=True)))
+        if num_batches is not None:
+            all_poems = all_poems[:num_batches * _BATCH_SIZE // 2]
         print('{} batches'.format(math.ceil(len(all_poems) * 2 / _BATCH_SIZE)))
         for poem in all_poems:
             yield ''.join(
@@ -152,7 +157,7 @@ class Discriminator(nn.Module):
         label_buffer: list[bool] = []
         loss_vals: list[float] = []
         grad_norm_sum: float = 0.0
-        print(f'Epoch #{self.training_epoch} ...')
+        print(f'Discriminator epoch #{self.training_epoch} ...')
         for seq, label in data:
             seq_buffer.append(seq)
             label_buffer.append(label)
@@ -163,12 +168,13 @@ class Discriminator(nn.Module):
                 if len(loss_vals) % _NUM_BATCHES_FOR_LOGGING == 0:
                     grad_norm = grad_norm_sum / _NUM_BATCHES_FOR_LOGGING
                     grad_norm_sum = 0.0
-                    print('Epoch #{}, {} batches: loss = {} grad_norm = {}'.
-                          format(
-                              self.training_epoch, len(loss_vals),
-                              statistics.mean(
-                                  loss_vals[-_NUM_BATCHES_FOR_LOGGING:]),
-                              grad_norm))
+                    print(
+                        'Discriminator epoch #{}, {} batches: loss = {} grad_norm = {}'
+                        .format(
+                            self.training_epoch, len(loss_vals),
+                            statistics.mean(
+                                loss_vals[-_NUM_BATCHES_FOR_LOGGING:]),
+                            grad_norm))
                 seq_buffer = []
                 label_buffer = []
         if seq_buffer:

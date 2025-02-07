@@ -45,7 +45,6 @@ _VISUALIZE_ATTENTION_WEIGHTS: bool = False
 _TRACK_MODEL_GRADIENTS: bool = False
 _TEACHER_FORCING: bool = False
 _ENABLE_EOS_HACK: bool = False
-_NUM_BATCHES_TO_SAVE_RL_MODEL: int = 100
 
 TOTAL_PRETRAINING_EPOCHS: int = _ALL_POEM_EPOCHS + _QIYANSHI_EPOCHS
 
@@ -218,7 +217,6 @@ class Generator:
         self.encoder = Encoder(self.vocab)
         self.decoder = Decoder(self.vocab)
         self.training_epoch = 0
-        self.batch_no = 0
         if not _FORCE_TRAINING and os.path.exists(_MODEL_PATH):
             self._load_model()
         if _TRACK_MODEL_GRADIENTS:
@@ -233,7 +231,6 @@ class Generator:
     def _load_model(self) -> None:
         checkpoint = torch.load(_MODEL_PATH, weights_only=True)
         self.training_epoch = checkpoint.get('epoch', 0)
-        self.batch_no = checkpoint.get('batch', 0)
         load_model(self.encoder, 'encoder', checkpoint)
         load_model(self.decoder, 'decoder', checkpoint)
 
@@ -241,7 +238,6 @@ class Generator:
         checkpoint_path = f'{_MODEL_PATH}.tmp'
         checkpoint = {
             'epoch': self.training_epoch,
-            'batch': self.batch_no,
         }
         save_model(self.encoder, 'encoder', checkpoint)
         save_model(self.decoder, 'decoder', checkpoint)
@@ -262,7 +258,7 @@ class Generator:
         self.decoder.train()
         self.target_weight = torch.ones(self.vocab_size)
         while self.training_epoch < TOTAL_PRETRAINING_EPOCHS:
-            print(f'Epoch #{self.training_epoch} ...')
+            print(f'Generator epoch #{self.training_epoch} ...')
             loss_vals: list[float] = []
             encoder_grad_norm_sum: float = 0.0
             decoder_grad_norm_sum: float = 0.0
@@ -282,11 +278,10 @@ class Generator:
                 self.decoder.optimizer.step()
                 encoder_grad_norm_sum += grad_norm(self.encoder)
                 decoder_grad_norm_sum += grad_norm(self.decoder)
-                self.batch_no += 1
                 if len(loss_vals) % _NUM_BATCHES_FOR_LOGGING == 0:
                     loss_val = statistics.mean(
                         loss_vals[-_NUM_BATCHES_FOR_LOGGING:])
-                    print('Epoch #{}, {} batches: loss = {}'.format(
+                    print('Generator epoch #{}, {} batches: loss = {}'.format(
                         self.training_epoch, len(loss_vals), loss_val))
                     encoder_grad_norm = encoder_grad_norm_sum / _NUM_BATCHES_FOR_LOGGING
                     encoder_grad_norm_sum = 0.0
@@ -300,7 +295,6 @@ class Generator:
                 .format(self.training_epoch, len(loss_vals), mean_loss,
                         statistics.stdev(loss_vals)))
             self.training_epoch += 1
-            self.batch_no = 0
             self._save_model()
         print('Finished training the LSTM poem generator.')
 
@@ -508,19 +502,18 @@ class Generator:
                                                  target_prob, results[::-1]))
             sentences.append(sentence + vocab.END_OF_SENTENCE)
 
-    def train_rl_model(self, k_actions: int, m_rollouts: int,
+    def train_rl_model(self, num_batches: int, k_actions: int, m_rollouts: int,
                        pretraining_weight: float, discriminator: Any) -> None:
         self.encoder.train()
         self.decoder.train()
         self.target_weight = torch.ones(self.vocab_size)
         print(f'Epoch #{self.training_epoch} (RL) ...')
-        poems = list(
-            filter(
-                lambda p: corpus.is_qiyanjueju(p) or corpus.is_qiyanlvshi(p),
-                corpus.get_poems(lambda ch: ch in self.vocab,
-                                 random_order=False)))
-        print(f'Total samples: {len(poems)}')
-        for poem in poems[self.batch_no:]:
+        batch_no = 0
+        for poem in corpus.get_poems(lambda ch: ch in self.vocab,
+                                     random_order=True):
+            if (not corpus.is_qiyanjueju(poem) and
+                    not corpus.is_qiyanlvshi(poem)):
+                continue
             self.encoder.optimizer.zero_grad()
             self.decoder.optimizer.zero_grad()
             loss = self._calculate_rl_loss(poem, k_actions, m_rollouts,
@@ -533,12 +526,11 @@ class Generator:
             nn.utils.clip_grad_norm_(self.decoder.parameters(), max_norm=5.0)
             self.encoder.optimizer.step()
             self.decoder.optimizer.step()
-            self.batch_no += 1
-            if self.batch_no % _NUM_BATCHES_TO_SAVE_RL_MODEL == 0:
-                self._save_model()
+            batch_no += 1
+            if batch_no == num_batches:
+                break
 
         self.training_epoch += 1
-        self.batch_no = 0
         self._save_model()
         self.encoder.eval()
         self.decoder.eval()
@@ -584,6 +576,7 @@ class Generator:
                 action_samples: list[tuple[int, float, float]] = []
                 prob_sum = 0.0
                 for log_prob, ch_idx in log_prob_ch_idx_pairs:
+                    # For each a, use MC rollout to estimate Q(s, a).
                     with torch.no_grad():
                         state_action_value: float = statistics.mean(
                             self._estimate_state_action_value(
@@ -592,9 +585,12 @@ class Generator:
                     action_samples.append(
                         (ch_idx, math.exp(log_prob), state_action_value))
                     prob_sum += action_samples[-1][1]
+                # Estimate V(s) as the baseline.
                 value_baseline = sum(
                     prob / prob_sum * state_action_value
                     for _, prob, state_action_value in action_samples)
+                # Construct the pseudo loss that leads to the policy gradient.
+                #  e.g. E[ log(pi(a | s)) * (Q(s, a) - V(s)) ]
                 rl_loss_vals.append(
                     sum(prob / prob_sum *
                         (value_baseline - state_action_value) *
