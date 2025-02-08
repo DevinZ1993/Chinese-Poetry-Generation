@@ -12,7 +12,7 @@ _NUM_ROLLOUTS: int = 3
 _PRETRAINING_WEIGHT: float = 0.2
 _NUM_RL_EPOCHS: int = 3
 _NUM_DISCRIMINATOR_BATCHES: int = 600
-_NUM_GENERATOR_BATCHES: int = 100
+_NUM_GENERATOR_BATCHES: int = 4000
 
 
 def train_seq_gan():
@@ -21,6 +21,9 @@ def train_seq_gan():
     d = discriminator.Discriminator(vocab_dict)
     while g.training_epoch < generator.TOTAL_PRETRAINING_EPOCHS + _NUM_RL_EPOCHS:
         d.train_on_all_poems(g,
+                             target_epochs=(g.training_epoch + 1 -
+                                            generator.TOTAL_PRETRAINING_EPOCHS +
+                                            discriminator.COLD_START_EPOCHS),
                              num_batches=_NUM_DISCRIMINATOR_BATCHES,
                              poem_filter=lambda p: corpus.is_qiyanjueju(p) or
                              corpus.is_qiyanlvshi(p))

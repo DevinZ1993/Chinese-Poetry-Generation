@@ -4,21 +4,22 @@ An ML-based classical Chinese poem generator.
 
 **Update: This was migrated into Python3 and TensorFlow 1.8 in Jun 2018.**
 
-**Update: This was migrated onto PyTorch from TensorFlow in Jan 2025.**
+**Update: This was migrated off TensorFlow 1.8 into PyTorch 2.5 in Jan 2025.**
 
 
 ## Components
 
-* vocab.py: A set of characters and their pre-trained embeddings.
+* [Vocab](vocab.py): A set of characters and their pre-trained embeddings.
 
-* generator.py: A poem generator based on LSTM encoder-decoder.
+* [Generator](generator.py): A poem generator based on LSTM encoder-decoder with
+Bahdanau attention.
 
-* discriminator.py: An LSTM-based classifier that distinguishes real poems
-from fake ones.
+* [Discriminator](discriminator.py): An LSTM-based classifier that distinguishes
+real poems from fake ones.
 
-* train\_seq\_gan.py: A training program for a
-[SeqGAN model](https://arxiv.org/pdf/1609.05473) implementation.
-
+* [SeqGAN Trainer](train_seq_gan.py): A training program that implements the
+idea of the [SeqGAN model](https://arxiv.org/pdf/1609.05473).
+This is still in the experimental stage.
 
 
 ## To Install Dependencies
@@ -57,9 +58,14 @@ python3 train_seq_gan.py
 
 ## Run Interactive Demos
 
+Start the program with:
+
 ```
 python3 demo.py
 ```
+
+Then enter a sequence of Chinese characters after the prompt
+as the first characters of the poem sentences to be generated.
 
 ## Preliminary Results
 

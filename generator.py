@@ -38,6 +38,8 @@ _ALL_POEM_EOS_WEIGHT: float = 1.0
 _QIYANSHI_EOS_WEIGHT: float = 10.0
 _ENCODER_LEARNING_RATE: float = 0.002
 _DECODER_LEARNING_RATE: float = 0.002
+_ENCODER_RL_LEARNING_RATE: float = 0.0005
+_DECODER_RL_LEARNING_RATE: float = 0.0005
 _FORCE_TRAINING: bool = False
 _MAX_SENTENCE_LEN: int = 11
 _BEAM_SIZE: int = 3
@@ -504,6 +506,11 @@ class Generator:
 
     def train_rl_model(self, num_batches: int, k_actions: int, m_rollouts: int,
                        pretraining_weight: float, discriminator: Any) -> None:
+        if self.training_epoch == TOTAL_PRETRAINING_EPOCHS:
+            self.encoder.optimizer = optim.Adam(self.encoder.parameters(),
+                                                lr=_ENCODER_RL_LEARNING_RATE)
+            self.decoder.optimizer = optim.Adam(self.decoder.parameters(),
+                                                lr=_DECODER_RL_LEARNING_RATE)
         self.encoder.train()
         self.decoder.train()
         self.target_weight = torch.ones(self.vocab_size)
@@ -519,7 +526,9 @@ class Generator:
             loss = self._calculate_rl_loss(poem, k_actions, m_rollouts,
                                            pretraining_weight, discriminator)
             loss.backward()
-            print('loss = {}'.format(loss.item()))
+            print(f'RL batch {batch_no} / {num_batches}: loss = {loss.item()}')
+            print(f'\tencoder grad: {grad_norm(self.encoder)}')
+            print(f'\tdecoder grad: {grad_norm(self.decoder)}')
             if _TRACK_MODEL_GRADIENTS:
                 self._track_model_gradients()
             nn.utils.clip_grad_norm_(self.encoder.parameters(), max_norm=5.0)
@@ -538,13 +547,15 @@ class Generator:
     def _calculate_rl_loss(self, poem: list[str], k_actions: int,
                            m_rollouts: int, pretraining_weight: float,
                            discriminator: Any) -> torch.Tensor:
+        sentences: list[str] = self.generate(''.join(
+            sentence[0] for sentence in poem))
+        print(sentences)
+
         rl_loss_vals: list[torch.Tensor] = []
-        sentences: list[str] = []
-        while len(sentences) < len(poem):
+        for sentence_idx, sentence in enumerate(sentences):
             context = ''.join(
-                sentence + vocab.END_OF_SENTENCE for sentence in
-                sentences[max(0,
-                              len(sentences) - _MAX_CONTEXT_SENTENCES):])
+                prev_sentence + vocab.END_OF_SENTENCE for prev_sentence in
+                sentences[max(0, sentence_idx - _MAX_CONTEXT_SENTENCES):])
             if not context:
                 context = vocab.END_OF_SENTENCE
             encoder_outputs, hidden_and_cell_states = self.encoder(
@@ -552,11 +563,9 @@ class Generator:
             encoder_output_padding_mask = torch.zeros(1,
                                                       len(context),
                                                       dtype=torch.bool)
-            sentence = poem[len(sentences)][0]
-            while len(sentence) < _MAX_SENTENCE_LEN:
-                print(sentences, sentence)
+            for ch_pos in range(1, len(sentence) + 1):
                 # Perform the one-step inference.
-                inputs = self.vocab.get_index_as_tensor(sentence[-1])
+                inputs = self.vocab.get_index_as_tensor(sentence[ch_pos - 1])
                 outputs, hidden_and_cell_states = self.decoder(
                     encoder_outputs=encoder_outputs,
                     encoder_output_padding_mask=encoder_output_padding_mask,
@@ -596,20 +605,6 @@ class Generator:
                         (value_baseline - state_action_value) *
                         log_probs[ch_idx]
                         for ch_idx, prob, state_action_value in action_samples))
-
-                # Apply only one of the k actions to the state.
-                ch: str | None = None
-                rand_val = random.uniform(0.0, prob_sum)
-                for ch_idx, prob, _ in action_samples:
-                    rand_val -= prob
-                    if rand_val <= 0.0:
-                        ch = self.vocab[ch_idx]
-                        break
-                assert ch is not None
-                if ch == vocab.END_OF_SENTENCE:
-                    break
-                sentence += ch
-            sentences.append(sentence)
         rl_loss: torch.Tensor = torch.mean(torch.stack(rl_loss_vals), dim=0)
 
         pretraining_data_batch: list[tuple[str, str]] = []

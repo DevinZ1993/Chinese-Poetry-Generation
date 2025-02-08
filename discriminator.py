@@ -22,10 +22,10 @@ import vocab
 
 EMBEDDING_DIM: int = vocab.EMBEDDING_DIM
 MODEL_DIM: int = 512
+COLD_START_EPOCHS: int = 2
 
 _MODEL_PATH: str = os.path.join(corpus.GENDATA_PATH, 'discriminator.pt')
 _NUM_RNN_LAYERS: int = 3
-_COLD_START_EPOCHS: int = 2
 _BATCH_SIZE: int = 64
 _NUM_BATCHES_FOR_LOGGING: int = 1
 _LEARNING_RATE: float = 0.002
@@ -112,16 +112,19 @@ class Discriminator(nn.Module):
     def _prepare_model(self) -> None:
         if not _FORCE_TRAINING and os.path.exists(_MODEL_PATH):
             self.load_model()
-        if self.training_epoch < _COLD_START_EPOCHS:
+        if self.training_epoch < COLD_START_EPOCHS:
             generator = FakePoemGenerator(self.vocab)
-            while self.training_epoch < _COLD_START_EPOCHS:
-                self.train_on_all_poems(generator)
+            while self.training_epoch < COLD_START_EPOCHS:
+                self.train_on_all_poems(generator, COLD_START_EPOCHS)
 
     def train_on_all_poems(
             self,
             generator: Any,
+            target_epochs: int,
             num_batches: int | None = None,
             poem_filter: Callable[[list[str]], bool] | None = None) -> None:
+        if self.training_epoch >= target_epochs:
+            return
         self.train()
         self._train_on_single_epoch(
             self._gen_pos_and_neg_samples_for_all_poems(generator, num_batches,
